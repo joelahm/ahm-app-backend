@@ -1,6 +1,5 @@
 const { AppError } = require('../../lib/errors');
 const authService = require('./auth.service');
-const { clearAuthCookies, setAuthCookies } = require('../../lib/authCookies');
 
 function readIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
@@ -30,8 +29,7 @@ async function login(req, res, next) {
       userAgent: readUserAgent(req)
     });
 
-    setAuthCookies(res, req.app.locals.env, data.tokens);
-    res.status(200).json({ user: data.user });
+    res.status(200).json(data);
   } catch (err) {
     next(err);
   }
@@ -39,9 +37,9 @@ async function login(req, res, next) {
 
 async function refresh(req, res, next) {
   try {
-    const refreshToken = req.cookies?.[req.app.locals.env.authCookies.refreshCookieName];
+    const { refreshToken } = req.body || {};
     if (!refreshToken) {
-      throw new AppError(401, 'UNAUTHORIZED', 'Missing refresh token cookie.');
+      throw new AppError(400, 'VALIDATION_ERROR', 'refreshToken is required.');
     }
 
     const data = await authService.refresh({
@@ -52,8 +50,7 @@ async function refresh(req, res, next) {
       userAgent: readUserAgent(req)
     });
 
-    setAuthCookies(res, req.app.locals.env, data.tokens);
-    res.status(200).json({ user: data.user });
+    res.status(200).json(data);
   } catch (err) {
     next(err);
   }
@@ -61,17 +58,17 @@ async function refresh(req, res, next) {
 
 async function logout(req, res, next) {
   try {
-    const refreshToken = req.cookies?.[req.app.locals.env.authCookies.refreshCookieName];
-
-    if (refreshToken) {
-      await authService.logout({
-        db: req.app.locals.db,
-        env: req.app.locals.env,
-        refreshToken
-      });
+    const { refreshToken } = req.body || {};
+    if (!refreshToken) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'refreshToken is required.');
     }
 
-    clearAuthCookies(res, req.app.locals.env);
+    await authService.logout({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      refreshToken
+    });
+
     res.status(200).json({ success: true });
   } catch (err) {
     next(err);

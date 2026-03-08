@@ -4,9 +4,7 @@ const { verifyAccessToken } = require('../lib/jwt');
 async function authenticateAccessToken(req, res, next) {
   try {
     const header = req.headers.authorization || '';
-    const bearerToken = header.startsWith('Bearer ') ? header.slice(7) : null;
-    const cookieToken = req.cookies?.[req.app.locals.env.authCookies.accessCookieName];
-    const token = cookieToken || bearerToken;
+    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
 
     if (!token) {
       throw new AppError(401, 'UNAUTHORIZED', 'Missing access token.');
