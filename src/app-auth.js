@@ -21,7 +21,8 @@ function createAuthApp() {
   const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || 'http://localhost:3000')
     .split(',')
     .map((origin) => origin.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((origin) => origin.replace(/\/$/, ''));
 
   const app = express();
   app.locals.env = env;
@@ -31,10 +32,18 @@ function createAuthApp() {
   app.use(
     cors({
       origin(origin, callback) {
+        const normalizedOrigin = (origin || '').replace(/\/$/, '');
+
         if (!origin || allowedOrigins.includes(origin)) {
           return callback(null, true);
         }
-        return callback(new Error('Not allowed by CORS'));
+
+        if (allowedOrigins.includes(normalizedOrigin)) {
+          return callback(null, true);
+        }
+
+        // Reject without throwing a server error for CORS mismatch.
+        return callback(null, false);
       },
       credentials: true
     })
