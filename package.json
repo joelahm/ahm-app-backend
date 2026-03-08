@@ -1,0 +1,31 @@
+{
+  "name": "ahm-app-backend",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node ./src/www-auth.js",
+    "start:legacy": "node ./bin/www",
+    "start:auth": "node ./src/www-auth.js",
+    "prisma:generate": "prisma generate",
+    "prisma:pull": "prisma db pull",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:seed": "node prisma/seed.js",
+    "bootstrap:admin": "node scripts/bootstrap-default-admin.js"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.2",
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "~1.4.4",
+    "cors": "^2.8.6",
+    "debug": "~2.6.9",
+    "dotenv": "^17.3.1",
+    "express": "~4.16.1",
+    "express-rate-limit": "^8.3.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "~1.9.1",
+    "prisma": "^6.16.2",
+    "zod": "^4.3.6"
+  }
+}
