@@ -63,3 +63,27 @@ export interface PatchUserRequest {
 export interface PatchPasswordRequest {
   newPassword: string;
 }
+
+export interface InviteMember {
+  email: string;
+  role: Role;
+}
+
+export interface InviteUsersRequest {
+  members: InviteMember[];
+  locations: string[];
+}
+
+export interface RegisterInvitedUserRequest {
+  token: string;
+  firstName: string;
+  lastName: string;
+  title: string;
+  phoneNumber: string;
+  email: string;
+  country: string;
+  timezone: string;
+  dateFormat: string;
+  password: string;
+  confirmPassword: string;
+}

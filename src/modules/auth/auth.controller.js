@@ -87,11 +87,116 @@ async function me(req, res, next) {
         id: user.id,
         email: user.email,
         role: user.role,
+        isActive: user.isActive,
         status: user.status,
         firstName: user.first_name,
-        lastName: user.last_name
+        lastName: user.last_name,
+        avatarUrl: user.avatar_url,
+        title: user.title,
+        phoneNumber: user.phone_number,
+        country: user.country,
+        timezone: user.timezone,
+        dateFormat: user.date_format,
+        createdAt: user.created_at,
+        updatedAt: user.updated_at
       }
     });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function validateInvitation(req, res, next) {
+  try {
+    const { token } = req.body || {};
+    if (!token) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'token is required.');
+    }
+
+    const data = await authService.validateInvitation({
+      db: req.app.locals.db,
+      token: String(token)
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function acceptInvitation(req, res, next) {
+  try {
+    const { token, firstName, lastName, password } = req.body || {};
+    if (!token) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'token is required.');
+    }
+
+    const data = await authService.acceptInvitation({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      token: String(token),
+      firstName,
+      lastName,
+      password,
+      ipAddress: readIp(req),
+      userAgent: readUserAgent(req)
+    });
+
+    res.status(201).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function checkInvitationByEmail(req, res, next) {
+  try {
+    const { email } = req.body || {};
+    const data = await authService.checkPendingInvitationByEmail({
+      db: req.app.locals.db,
+      email
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function registerInvitedUser(req, res, next) {
+  try {
+    const {
+      token,
+      firstName,
+      lastName,
+      title,
+      phoneNumber,
+      email,
+      country,
+      timezone,
+      dateFormat,
+      password,
+      confirmPassword
+    } = req.body || {};
+
+    const data = await authService.registerInvitedUser({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      token,
+      firstName,
+      lastName,
+      title,
+      phoneNumber,
+      email,
+      country,
+      timezone,
+      dateFormat,
+      password,
+      confirmPassword,
+      ipAddress: readIp(req),
+      userAgent: readUserAgent(req)
+    });
+
+    res.status(201).json(data);
   } catch (err) {
     next(err);
   }
@@ -101,5 +206,9 @@ module.exports = {
   login,
   refresh,
   logout,
-  me
+  me,
+  validateInvitation,
+  acceptInvitation,
+  checkInvitationByEmail,
+  registerInvitedUser
 };

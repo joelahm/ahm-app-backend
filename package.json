@@ -25,7 +25,10 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "~1.9.1",
+    "multer": "^2.0.2",
+    "nodemailer": "^6.10.1",
     "prisma": "^6.16.2",
+    "socket.io": "^4.8.3",
     "zod": "^4.3.6"
   }
 }

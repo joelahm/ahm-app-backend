@@ -20,6 +20,10 @@ build/
 coverage/
 .tmp/
 .cache/
+public/uploads/avatars/*
+!public/uploads/avatars/.gitkeep
+public/uploads/clients/*
+!public/uploads/clients/.gitkeep
 
 # framework/tooling
 .next/

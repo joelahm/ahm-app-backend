@@ -12,7 +12,12 @@ const { readEnv } = require('./config/env');
 const { createPrismaClient } = require('./config/db');
 const { authRouter } = require('./modules/auth/auth.routes');
 const { usersRouter } = require('./modules/users/users.routes');
+const { clientsRouter } = require('./modules/clients/clients.routes');
+const { projectsRouter } = require('./modules/projects/projects.routes');
+const { integrationsRouter } = require('./modules/integrations/integrations.routes');
+const { scansRouter } = require('./modules/scans/scans.routes');
 const { healthRouter } = require('./modules/health/health.routes');
+const { notFoundHandler } = require('./middleware/notFoundHandler');
 const { errorHandler } = require('./middleware/errorHandler');
 
 function createAuthApp() {
@@ -28,7 +33,12 @@ function createAuthApp() {
   app.locals.env = env;
   app.locals.db = db;
 
-  app.use(helmet());
+  app.use(
+    helmet({
+      // Allow frontend on a different origin to render uploaded images.
+      crossOriginResourcePolicy: { policy: 'cross-origin' }
+    })
+  );
   app.use(
     cors({
       origin(origin, callback) {
@@ -68,8 +78,13 @@ function createAuthApp() {
   );
 
   app.use('/api/v1/users', usersRouter);
+  app.use('/api/v1/clients', clientsRouter);
+  app.use('/api/v1/projects', projectsRouter);
+  app.use('/api/v1/integrations', integrationsRouter);
+  app.use('/api/v1/scans', scansRouter);
   app.use('/api/v1', healthRouter);
 
+  app.use(notFoundHandler);
   app.use(errorHandler);
 
   return app;

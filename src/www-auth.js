@@ -3,18 +3,28 @@
 const http = require('http');
 const debug = require('debug')('ahm-app-backend:server');
 const { createAuthApp } = require('./app-auth');
+const { attachSocketServer } = require('./lib/socket');
+const { startScanScheduler } = require('./modules/scans/scans.scheduler');
 
 const app = createAuthApp();
 const port = normalizePort(process.env.PORT || '3000');
 app.set('port', port);
 
 const server = http.createServer(app);
+const io = attachSocketServer(server);
+app.locals.io = io;
+app.locals.scanScheduler = startScanScheduler({
+  db: app.locals.db,
+  env: app.locals.env,
+  io
+});
 server.listen(port);
 server.on('error', onError);
 server.on('listening', onListening);
 
 async function shutdown(signal) {
   try {
+    app.locals.scanScheduler?.stop?.();
     await app.locals.db.$disconnect();
   } catch (err) {
     // eslint-disable-next-line no-console

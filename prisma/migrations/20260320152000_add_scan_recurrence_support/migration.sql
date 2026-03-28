@@ -1,0 +1,6 @@
+ALTER TABLE `scans`
+  ADD COLUMN `recurrence_enabled` BOOLEAN NOT NULL DEFAULT false AFTER `labels`,
+  MODIFY COLUMN `frequency` VARCHAR(32) NULL,
+  MODIFY COLUMN `repeat_time` INT UNSIGNED NULL,
+  MODIFY COLUMN `start_at` DATETIME(3) NULL,
+  MODIFY COLUMN `next_run_at` DATETIME(3) NULL;

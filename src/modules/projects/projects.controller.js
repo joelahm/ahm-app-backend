@@ -1,0 +1,167 @@
+const { AppError } = require('../../lib/errors');
+const projectsService = require('./projects.service');
+
+function readProjectId(req) {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid project id.');
+  }
+  return id;
+}
+
+function readProjectIdFromBody(req) {
+  const id = Number(req.body?.projectId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'projectId must be a positive integer.');
+  }
+  return id;
+}
+
+function readTaskId(req) {
+  const id = Number(req.params.taskId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid task id.');
+  }
+  return id;
+}
+
+function readCommentId(req) {
+  const id = Number(req.params.commentId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid comment id.');
+  }
+  return id;
+}
+
+async function createProjectTask(req, res, next) {
+  try {
+    const projectId = readProjectId(req);
+    const task = await projectsService.createTask({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      projectId,
+      payload: req.body || {}
+    });
+
+    res.status(201).json({ task });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createProjectTaskFromBody(req, res, next) {
+  try {
+    const projectId = readProjectIdFromBody(req);
+    const task = await projectsService.createTask({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      projectId,
+      payload: req.body || {}
+    });
+
+    res.status(201).json({ task });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateProjectTask(req, res, next) {
+  try {
+    const taskId = readTaskId(req);
+    const task = await projectsService.updateTask({
+      db: req.app.locals.db,
+      taskId,
+      payload: req.body || {}
+    });
+
+    res.status(200).json({ task });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listTasksGroupedByProject(req, res, next) {
+  try {
+    const data = await projectsService.listTasksGroupedByProject({
+      db: req.app.locals.db,
+      clientId: req.query.clientId
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteProjectTask(req, res, next) {
+  try {
+    const taskId = readTaskId(req);
+    const data = await projectsService.deleteTask({
+      db: req.app.locals.db,
+      taskId
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createTaskComment(req, res, next) {
+  try {
+    const taskId = readTaskId(req);
+    const comment = await projectsService.createTaskComment({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      taskId,
+      payload: req.body || {}
+    });
+
+    res.status(201).json({ comment });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listTaskComments(req, res, next) {
+  try {
+    const taskId = readTaskId(req);
+    const comments = await projectsService.listTaskComments({
+      db: req.app.locals.db,
+      taskId
+    });
+
+    res.status(200).json({
+      comments,
+      total: comments.length
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteTaskComment(req, res, next) {
+  try {
+    const commentId = readCommentId(req);
+    const data = await projectsService.deleteTaskComment({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      commentId
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = {
+  listTasksGroupedByProject,
+  createProjectTask,
+  createProjectTaskFromBody,
+  updateProjectTask,
+  deleteProjectTask,
+  createTaskComment,
+  listTaskComments,
+  deleteTaskComment
+};

@@ -20,6 +20,40 @@ function readSameSite() {
   return 'lax';
 }
 
+function readSmtpAuthMode() {
+  const mode = (process.env.SMTP_AUTH_MODE || 'password').toLowerCase();
+  if (mode === 'password' || mode === 'google_oauth2' || mode === 'auto') {
+    return mode;
+  }
+  return 'password';
+}
+
+function readBoolean(value, defaultValue = false) {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['false', '0', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  return defaultValue;
+}
+
+function readPositiveInteger(value, defaultValue) {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return defaultValue;
+  }
+
+  return parsed;
+}
+
 function readEnv() {
   const required = ['ACCESS_TOKEN_SECRET', 'REFRESH_TOKEN_SECRET'];
 
@@ -54,6 +88,46 @@ function readEnv() {
       refreshTokenSecret: process.env.REFRESH_TOKEN_SECRET,
       accessTokenTtlSeconds: Number(process.env.ACCESS_TOKEN_TTL_SECONDS || 900),
       refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL_SECONDS || 2592000)
+    },
+    invite: {
+      expiresInHours: Number(process.env.INVITE_EXPIRES_HOURS || 72),
+      baseUrl: process.env.INVITE_BASE_URL || process.env.APP_BASE_URL || null
+    },
+    email: {
+      authMode: readSmtpAuthMode(),
+      host: process.env.SMTP_HOST || null,
+      port: Number(process.env.SMTP_PORT || 587),
+      user: process.env.SMTP_USER || null,
+      pass: process.env.SMTP_PASS || null,
+      from: process.env.SMTP_FROM || null,
+      secure: String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
+      googleClientId: process.env.GOOGLE_SMTP_CLIENT_ID || null,
+      googleClientSecret: process.env.GOOGLE_SMTP_CLIENT_SECRET || null,
+      googleRefreshToken: process.env.GOOGLE_SMTP_REFRESH_TOKEN || null
+    },
+    integrations: {
+      dataForSeo: {
+        baseUrl: process.env.DATAFORSEO_BASE_URL || 'https://api.dataforseo.com',
+        login: process.env.DATAFORSEO_LOGIN || null,
+        password: process.env.DATAFORSEO_PASSWORD || null,
+        cacheTtlMinutes: Number(process.env.DATAFORSEO_CACHE_TTL_MINUTES || 1440)
+      },
+      serpApi: {
+        baseUrl: process.env.SERPAPI_BASE_URL || 'https://serpapi.com',
+        apiKey: process.env.SERPAPI_API_KEY || null,
+        cacheTtlMinutes: Number(process.env.SERPAPI_CACHE_TTL_MINUTES || 1440)
+      }
+    },
+    scans: {
+      schedulerEnabled: readBoolean(process.env.SCAN_SCHEDULER_ENABLED, true),
+      schedulerPollIntervalMs: readPositiveInteger(
+        process.env.SCAN_SCHEDULER_POLL_INTERVAL_MS,
+        60_000
+      ),
+      schedulerBatchSize: readPositiveInteger(
+        process.env.SCAN_SCHEDULER_BATCH_SIZE,
+        10
+      )
     }
   };
 }
