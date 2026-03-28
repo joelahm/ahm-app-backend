@@ -142,7 +142,7 @@ FROM `scan_keyword_expanded` ske
 JOIN `scans` s
   ON s.client_id = ske.client_id
   AND s.gbp_profile_id = ske.gbp_profile_id
-  AND s.keyword = ske.keyword
+  AND s.keyword = (ske.keyword COLLATE utf8mb4_unicode_ci)
   AND s.created_at = ske.created_at
   AND s.updated_at = ske.updated_at;
 
@@ -241,7 +241,7 @@ FROM `scan_results_old` sr
 JOIN `scan_runs_old` sro ON sro.id = sr.scan_run_id
 JOIN `scan_run_map` srm ON srm.old_run_id = sro.id
 JOIN `scans` s ON s.id = srm.new_scan_id
-WHERE sr.keyword = s.keyword;
+WHERE (sr.keyword COLLATE utf8mb4_unicode_ci) = s.keyword;
 
 DROP TABLE `scan_results_old`;
 DROP TABLE `scan_runs_old`;
