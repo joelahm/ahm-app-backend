@@ -9,6 +9,14 @@ function readProjectId(req) {
   return id;
 }
 
+function readProjectIdParam(req) {
+  const id = Number(req.params.projectId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid project id.');
+  }
+  return id;
+}
+
 function readProjectIdFromBody(req) {
   const id = Number(req.body?.projectId);
   if (!Number.isFinite(id) || id <= 0) {
@@ -155,6 +163,54 @@ async function deleteTaskComment(req, res, next) {
   }
 }
 
+async function createProjectComment(req, res, next) {
+  try {
+    const projectId = readProjectIdParam(req);
+    const comment = await projectsService.createProjectComment({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      projectId,
+      payload: req.body || {}
+    });
+
+    res.status(201).json({ comment });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listProjectComments(req, res, next) {
+  try {
+    const projectId = readProjectIdParam(req);
+    const comments = await projectsService.listProjectComments({
+      db: req.app.locals.db,
+      projectId
+    });
+
+    res.status(200).json({
+      comments,
+      total: comments.length
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteProjectComment(req, res, next) {
+  try {
+    const commentId = readCommentId(req);
+    const data = await projectsService.deleteProjectComment({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      commentId
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   listTasksGroupedByProject,
   createProjectTask,
@@ -163,5 +219,8 @@ module.exports = {
   deleteProjectTask,
   createTaskComment,
   listTaskComments,
-  deleteTaskComment
+  deleteTaskComment,
+  createProjectComment,
+  listProjectComments,
+  deleteProjectComment
 };

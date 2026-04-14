@@ -106,6 +106,7 @@ function readEnv() {
       googleRefreshToken: process.env.GOOGLE_SMTP_REFRESH_TOKEN || null
     },
     integrations: {
+      aiTitleProvider: String(process.env.AI_TITLE_PROVIDER || 'MANUS').trim().toUpperCase(),
       dataForSeo: {
         baseUrl: process.env.DATAFORSEO_BASE_URL || 'https://api.dataforseo.com',
         login: process.env.DATAFORSEO_LOGIN || null,
@@ -116,6 +117,18 @@ function readEnv() {
         baseUrl: process.env.SERPAPI_BASE_URL || 'https://serpapi.com',
         apiKey: process.env.SERPAPI_API_KEY || null,
         cacheTtlMinutes: Number(process.env.SERPAPI_CACHE_TTL_MINUTES || 1440)
+      },
+      manus: {
+        baseUrl: process.env.MANUS_API_BASE_URL || 'https://api.manus.ai',
+        apiKey: process.env.MANUS_API_KEY || null,
+        pollIntervalMs: Number(process.env.MANUS_POLL_INTERVAL_MS || 1500),
+        maxPollAttempts: Number(process.env.MANUS_MAX_POLL_ATTEMPTS || 80)
+      },
+      openai: {
+        baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com',
+        apiKey: process.env.OPENAI_API_KEY || null,
+        model: process.env.OPENAI_MODEL || 'gpt-5.2',
+        maxOutputTokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 120)
       }
     },
     scans: {

@@ -17,6 +17,16 @@ model Role {
   @@map("roles")
 }
 
+model AppSetting {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  key       String   @unique(map: "uq_app_settings_key") @map("setting_key") @db.VarChar(120)
+  valueJson Json     @map("value_json")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("app_settings")
+}
+
 model User {
   id                BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
   email             String         @unique(map: "uq_users_email") @db.VarChar(255)
@@ -49,12 +59,19 @@ model User {
   accountManagedProjects       ClientProject[] @relation("AccountManagedProjects")
   createdClientProjects        ClientProject[] @relation("ClientProjectCreatedBy")
   createdClientCitations       ClientCitation[] @relation("ClientCitationCreatedBy")
+  createdProjectTemplates      ProjectTemplate[] @relation("ProjectTemplateCreatedBy")
   assignedProjectTasks         ProjectTask[]   @relation("ProjectTaskAssignedTo")
   createdProjectTasks          ProjectTask[]   @relation("ProjectTaskCreatedBy")
   taskComments                 TaskComment[]   @relation("TaskCommentCreatedBy")
+  projectComments              ProjectComment[] @relation("ProjectCommentCreatedBy")
   externalApiLogs              ExternalApiLog[] @relation("ExternalApiLogRequestedBy")
+  manusApiLogs                 ManusApiLog[] @relation("ManusApiLogRequestedBy")
   createdScans                 Scan[]         @relation("ScanCreatedBy")
   triggeredScanRuns            ScanRun[]      @relation("ScanRunTriggeredBy")
+  createdGeneratedSchemas     GeneratedSchema[] @relation("GeneratedSchemaCreatedBy")
+  createdAiPrompts            AiPrompt[] @relation("AiPromptCreatedBy")
+  createdCitationDatabaseEntries CitationDatabaseEntry[] @relation("CitationDatabaseEntryCreatedBy")
+  createdKeywordContentLists    KeywordContentList[] @relation("KeywordContentListCreatedBy")
 
   @@index([roleCode], map: "idx_users_role_code")
   @@index([status, isActive], map: "idx_users_status_active")
@@ -204,8 +221,12 @@ model Client {
   projects                      ClientProject[]
   citations                     ClientCitation[]
   externalApiLogs               ExternalApiLog[]
+  manusApiLogs                  ManusApiLog[]
+  keywordContentLists           KeywordContentList[]
   gbpProfile                    ClientGbpProfile?
   scans                         Scan[]
+  generatedSchemas              GeneratedSchema[]
+  aiPrompts                     AiPrompt[]
 
   @@index([businessName], map: "idx_clients_business_name")
   @@index([practiceEmail], map: "idx_clients_practice_email")
@@ -232,6 +253,7 @@ model ClientProject {
   accountManager         User?    @relation("AccountManagedProjects", fields: [accountManagerId], references: [id], onDelete: SetNull, map: "fk_client_projects_account_manager")
   creator                User?    @relation("ClientProjectCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_projects_created_by")
   tasks                  ProjectTask[]
+  comments               ProjectComment[]
   externalApiLogs        ExternalApiLog[]
 
   @@index([clientId], map: "idx_client_projects_client_id")
@@ -239,6 +261,23 @@ model ClientProject {
   @@index([accountManagerId], map: "idx_client_projects_account_manager_id")
   @@index([createdBy], map: "idx_client_projects_created_by")
   @@map("client_projects")
+}
+
+model ProjectTemplate {
+  id          String   @id @db.VarChar(64)
+  projectName String   @map("project_name") @db.VarChar(180)
+  description String   @db.LongText
+  status      String   @db.VarChar(64)
+  tasks       Json
+  createdBy   BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  creator     User?    @relation("ProjectTemplateCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_project_templates_created_by")
+
+  @@index([updatedAt], map: "idx_project_templates_updated_at")
+  @@index([createdBy], map: "idx_project_templates_created_by")
+  @@map("project_templates")
 }
 
 model ClientCitation {
@@ -306,6 +345,22 @@ model TaskComment {
   @@map("task_comments")
 }
 
+model ProjectComment {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  projectId BigInt   @map("project_id") @db.UnsignedBigInt
+  comment   String   @db.Text
+  createdBy BigInt   @map("created_by") @db.UnsignedBigInt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  project   ClientProject @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_project_comments_project")
+  creator   User          @relation("ProjectCommentCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade, map: "fk_project_comments_created_by")
+
+  @@index([projectId], map: "idx_project_comments_project_id")
+  @@index([createdBy], map: "idx_project_comments_created_by")
+  @@map("project_comments")
+}
+
 model ExternalApiLog {
   id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   provider           String    @db.VarChar(64)
@@ -337,6 +392,82 @@ model ExternalApiLog {
   @@index([requestedBy], map: "idx_external_api_logs_requested_by")
   @@index([createdAt], map: "idx_external_api_logs_created_at")
   @@map("external_api_logs")
+}
+
+model ManusApiLog {
+  id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  operation          String    @db.VarChar(128)
+  clientId           BigInt?   @map("client_id") @db.UnsignedBigInt
+  requestedBy        BigInt?   @map("requested_by") @db.UnsignedBigInt
+  endpoint           String    @db.VarChar(255)
+  requestMethod      String    @map("request_method") @db.VarChar(16)
+  requestPayload     Json      @map("request_payload")
+  responseStatusCode Int?      @map("response_status_code")
+  responsePayload    Json?     @map("response_payload")
+  isSuccess          Boolean   @default(false) @map("is_success")
+  externalTaskId     String?   @map("external_task_id") @db.VarChar(128)
+  errorMessage       String?   @map("error_message") @db.Text
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  client             Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull, map: "fk_manus_api_logs_client")
+  requester          User?     @relation("ManusApiLogRequestedBy", fields: [requestedBy], references: [id], onDelete: SetNull, map: "fk_manus_api_logs_requested_by")
+
+  @@index([operation], map: "idx_manus_api_logs_operation")
+  @@index([clientId], map: "idx_manus_api_logs_client_id")
+  @@index([requestedBy], map: "idx_manus_api_logs_requested_by")
+  @@index([createdAt], map: "idx_manus_api_logs_created_at")
+  @@map("manus_api_logs")
+}
+
+model KeywordContentList {
+  id                      BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId                BigInt    @map("client_id") @db.UnsignedBigInt
+  location                String    @db.VarChar(120)
+  enableContentClustering Boolean   @default(false) @map("enable_content_clustering")
+  topic                   String?   @db.VarChar(255)
+  audience                String?   @db.VarChar(255)
+  keywordsJson            Json      @map("keywords_json")
+  createdBy               BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  client                  Client    @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_keyword_content_lists_client")
+  creator                 User?     @relation("KeywordContentListCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_keyword_content_lists_created_by")
+
+  @@index([clientId], map: "idx_keyword_content_lists_client_id")
+  @@index([createdBy], map: "idx_keyword_content_lists_created_by")
+  @@index([createdAt], map: "idx_keyword_content_lists_created_at")
+  @@map("keyword_content_lists")
+}
+
+
+model DataForSeoGoogleAdsLocation {
+  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  locationCode      Int      @unique(map: "uq_dataforseo_google_ads_locations_location_code") @map("location_code") @db.UnsignedInt
+  locationName      String   @map("location_name") @db.VarChar(255)
+  locationCodeParent Int?    @map("location_code_parent") @db.UnsignedInt
+  countryIsoCode    String?  @map("country_iso_code") @db.VarChar(8)
+  locationType      String?  @map("location_type") @db.VarChar(64)
+  rawData           Json     @map("raw_data")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([countryIsoCode, locationCodeParent], map: "idx_dataforseo_google_ads_locations_country_parent")
+  @@index([locationType], map: "idx_dataforseo_google_ads_locations_location_type")
+  @@map("dataforseo_google_ads_locations")
+}
+
+model DataForSeoGoogleAdsLanguage {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  languageCode String   @unique(map: "uq_dataforseo_google_ads_languages_language_code") @map("language_code") @db.VarChar(16)
+  languageName String   @map("language_name") @db.VarChar(120)
+  rawData      Json     @map("raw_data")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([languageName], map: "idx_dataforseo_google_ads_languages_language_name")
+  @@map("dataforseo_google_ads_languages")
 }
 
 model ClientGbpProfile {
@@ -453,4 +584,70 @@ model ScanResult {
   @@index([matchedPlaceId], map: "idx_scan_results_matched_place_id")
   @@index([apiLogId], map: "idx_scan_results_api_log_id")
   @@map("scan_results")
+}
+
+model GeneratedSchema {
+  id            String   @id @db.VarChar(64)
+  clientId      BigInt   @map("client_id") @db.UnsignedBigInt
+  schemaType    String   @map("schema_type") @db.VarChar(64)
+  clientName    String   @map("client_name") @db.VarChar(180)
+  previewJson   String   @map("preview_json") @db.LongText
+  businessHours Json     @map("business_hours")
+  formValues    Json     @map("form_values")
+  createdBy     BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_generated_schemas_client")
+  creator       User?    @relation("GeneratedSchemaCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_generated_schemas_created_by")
+
+  @@unique([clientId, schemaType], map: "uq_generated_schemas_client_schema_type")
+  @@index([updatedAt], map: "idx_generated_schemas_updated_at")
+  @@index([createdBy], map: "idx_generated_schemas_created_by")
+  @@map("generated_schemas")
+}
+
+
+model AiPrompt {
+  id           String   @id @db.VarChar(64)
+  uniqueId     String   @unique(map: "uq_ai_prompts_unique_id") @map("unique_id") @db.VarChar(32)
+  name         String   @db.VarChar(255)
+  purpose      String   @db.Text
+  status       String   @db.VarChar(32)
+  typeOfPost   String   @map("type_of_post") @db.VarChar(255)
+  clientId     BigInt   @map("client_id") @db.UnsignedBigInt
+  customValues Json     @map("custom_values")
+  maxCharacter String   @map("max_character") @db.VarChar(64)
+  prompt       String   @db.LongText
+  attachments  Json
+  createdBy    BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_ai_prompts_client")
+  creator      User?    @relation("AiPromptCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_ai_prompts_created_by")
+
+  @@index([clientId], map: "idx_ai_prompts_client_id")
+  @@index([createdBy], map: "idx_ai_prompts_created_by")
+  @@index([updatedAt], map: "idx_ai_prompts_updated_at")
+  @@map("ai_prompts")
+}
+
+model CitationDatabaseEntry {
+  id             String   @id @db.VarChar(64)
+  name           String   @db.VarChar(180)
+  type           String   @db.VarChar(64)
+  niche          String   @db.VarChar(180)
+  validationLink String   @map("validation_link") @db.VarChar(500)
+  da             Int
+  payment        String   @db.VarChar(32)
+  createdBy      BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  creator        User?    @relation("CitationDatabaseEntryCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_citation_database_entries_created_by")
+
+  @@index([createdBy], map: "idx_citation_database_entries_created_by")
+  @@index([updatedAt], map: "idx_citation_database_entries_updated_at")
+  @@map("citation_database_entries")
 }

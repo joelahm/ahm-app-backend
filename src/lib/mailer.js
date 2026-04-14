@@ -77,15 +77,102 @@ function createTransporter(env) {
   return transporter;
 }
 
-async function sendInviteEmail({ env, to, inviteUrl, role }) {
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function resolveInviteName(name, to) {
+  if (typeof name === 'string' && name.trim()) {
+    return name.trim();
+  }
+
+  const localPart = String(to || '').split('@')[0] || '';
+  const parts = localPart
+    .split(/[._-]+/g)
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`);
+
+  return parts.join(' ').trim() || 'there';
+}
+
+function buildInviteHtml({ name, inviteUrl }) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>AHM App Invitation</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f6f8; font-family: Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f8; padding: 40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:8px; padding:40px;">
+          <tr>
+            <td align="center" style="padding-bottom: 20px;">
+              <img src="https://cdn.prod.website-files.com/695060a70f86706055aaf7e5/696531eb7ecaf37fcfae560f_Frame%2010.png" alt="AHM App Logo" width="120" />
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:24px; font-weight:bold; color:#333; padding-bottom:20px;">
+              Hi ${escapeHtml(name)},
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:16px; color:#555; line-height:1.6; padding-bottom:30px;">
+              You’ve been invited to join <strong>AHM App</strong>.<br><br>
+              This invitation gives you access to the platform, where you can start managing and using the available features assigned to your account. We’ve made the setup process simple so you can get started quickly without any hassle.<br><br>
+              To begin, please click the button below and complete your account setup. Once done, you’ll be able to log in and start using the application right away.
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding-bottom:30px;">
+              <a href="${escapeHtml(inviteUrl)}"
+                 style="background-color:#1a73e8; color:#ffffff; padding:14px 28px; text-decoration:none; border-radius:6px; font-size:16px; display:inline-block;">
+                Set up your account
+              </a>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:14px; color:#777; line-height:1.6; padding-bottom:20px;">
+              If the button above does not work, you can copy and paste the following link into your browser:<br>
+              <span style="color:#1a73e8;">${escapeHtml(inviteUrl)}</span>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:14px; color:#777; text-align:center;">
+              Welcome aboard,<br>
+              <strong>AHM App Team</strong>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+async function sendInviteEmail({ env, to, inviteUrl, role, name }) {
   const tx = createTransporter(env);
+  const recipientName = resolveInviteName(name, to);
 
   await tx.sendMail({
     from: env.email.from,
     to,
     subject: 'You are invited to AHM App',
-    text: `You were invited as ${role}. Open this link to continue: ${inviteUrl}`,
-    html: `<p>You were invited as <strong>${role}</strong>.</p><p><a href="${inviteUrl}">Accept Invitation</a></p>`
+    text: `Hi ${recipientName},\n\nYou were invited as ${role}. Open this link to continue: ${inviteUrl}\n\nWelcome aboard,\nAHM App Team`,
+    html: buildInviteHtml({ name: recipientName, inviteUrl })
   });
 }
 

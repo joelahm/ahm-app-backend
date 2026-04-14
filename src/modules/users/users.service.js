@@ -6,12 +6,364 @@ const { sendInviteEmail } = require('../../lib/mailer');
 const fs = require('fs/promises');
 const path = require('path');
 
-const ALLOWED_ROLES = new Set(['ADMIN', 'TEAM_MEMBER']);
+const ALLOWED_ROLES = new Set(['ADMIN', 'TEAM_MEMBER', 'GUEST']);
 const ALLOWED_STATUS = new Set(['ACTIVE', 'DISABLED', 'LOCKED', 'DELETED']);
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PERMISSIONS_SETTINGS_KEY = 'workspace_permissions';
+
+const DEFAULT_PERMISSIONS_SETTINGS = {
+  sections: [
+    {
+      key: 'user-role-and-permissions',
+      title: 'User Role and Permissions',
+      description:
+        'Control who can manage users, assign roles, and update permission levels within the workspace.',
+      hasGuestColumn: false,
+      rows: [
+        {
+          key: 'add-new-user',
+          title: 'Add New User',
+          description: 'Allow users to invite new users to the workspace',
+          memberEnabled: false,
+          adminEnabled: true
+        },
+        {
+          key: 'remove-user',
+          title: 'Remove User',
+          description: 'Allow users to remove existing members from the workspace.',
+          memberEnabled: false,
+          adminEnabled: true
+        },
+        {
+          key: 'change-user-role',
+          title: 'Change User Role',
+          description: 'Allow users to update roles of existing users.',
+          memberEnabled: false,
+          adminEnabled: true
+        }
+      ]
+    },
+    {
+      key: 'gbp-posts',
+      title: 'GBP Posts',
+      description:
+        'Manage who can view, create, schedule, publish, and edit Google Business Profile posts.',
+      hasGuestColumn: false,
+      rows: [
+        {
+          key: 'view-posts',
+          title: 'View Posts',
+          description: 'Allow users to view Google Business Profile posts.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'create-draft-posts',
+          title: 'Create Draft Posts',
+          description: 'Allow users to create and save draft posts.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'schedule-gbp-posts',
+          title: 'Schedule GBP Posts',
+          description: 'Allow users to schedule posts for future publishing.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'publish-immediately',
+          title: 'Publish Immediately',
+          description: 'Allow users to publish posts instantly.',
+          memberEnabled: false,
+          adminEnabled: true
+        },
+        {
+          key: 'edit-delete-published-posts',
+          title: 'Edit/Delete Published Posts',
+          description: 'Allow users to edit or remove published posts.',
+          memberEnabled: false,
+          adminEnabled: true
+        }
+      ]
+    },
+    {
+      key: 'google-reviews',
+      title: 'Google Reviews',
+      description:
+        'Control access to viewing, replying to, and managing Google reviews and reply templates.',
+      hasGuestColumn: false,
+      rows: [
+        {
+          key: 'reply-to-reviews',
+          title: 'Reply To Reviews',
+          description: 'Allow users to respond to customer reviews.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'use-reply-templates',
+          title: 'Use Reply Templates',
+          description: 'Allow users to use pre-saved reply templates.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'manage-review-templates',
+          title: 'Manage Review Templates',
+          description: 'Allow users to create, edit, and manage review reply templates.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'manage-ai-auto-reply',
+          title: 'Manage AI Auto-Reply',
+          description: 'Allow users to configure and manage AI-powered automatic replies.',
+          memberEnabled: false,
+          adminEnabled: true
+        },
+        {
+          key: 'delete-replies',
+          title: 'Delete Replies',
+          description: 'Allow users to remove published review replies.',
+          memberEnabled: false,
+          adminEnabled: true
+        }
+      ]
+    },
+    {
+      key: 'local-rank-scanner',
+      title: 'Local Rank Scanner',
+      description: 'Manage access to scans, results, and reports.',
+      hasGuestColumn: false,
+      rows: [
+        {
+          key: 'local-rank-scanner-access',
+          title: 'Local Rank Scanner Access',
+          description: 'Allow users to access the Local Rank Scanner feature.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'view-scan-results',
+          title: 'View Scan Results',
+          description: 'Allow users to view local ranking scan results and historical data.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'run-quick-scans',
+          title: 'Run Quick Scans',
+          description: 'Allow users to run one-time local rank scans.',
+          memberEnabled: false,
+          adminEnabled: true
+        },
+        {
+          key: 'run-recurring-scans',
+          title: 'Run Recurring Scans',
+          description: 'Allow users to schedule and run automated recurring rank scans.',
+          memberEnabled: false,
+          adminEnabled: true
+        },
+        {
+          key: 'export-scan-reports',
+          title: 'Export Scan Reports',
+          description: 'Allow users to export local rank scan reports for sharing or analysis.',
+          memberEnabled: false,
+          adminEnabled: true
+        }
+      ]
+    },
+    {
+      key: 'schema-generator',
+      title: 'Schema Generator',
+      description:
+        'Manage access to the Schema Generator module, including creating, editing, and exporting schema markup.',
+      hasGuestColumn: true,
+      rows: [
+        {
+          key: 'schema-generator-access',
+          title: 'Schema Generator Access',
+          description: 'Allow users to access and view the Schema Generator feature',
+          guestEnabled: true,
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'generate-schema',
+          title: 'Generate schema',
+          description: 'Allow users to create new schema markup.',
+          guestEnabled: false,
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'edit-schema',
+          title: 'Edit schema',
+          description: 'Allow users to modify existing schema markup.',
+          guestEnabled: false,
+          memberEnabled: false,
+          adminEnabled: true
+        },
+        {
+          key: 'export-json',
+          title: 'Export JSON',
+          description: 'Allow users to export schema markup in JSON format.',
+          guestEnabled: false,
+          memberEnabled: true,
+          adminEnabled: true
+        }
+      ]
+    },
+    {
+      key: 'directory-listing',
+      title: 'Directory Listing',
+      description:
+        'Control permissions for managing business listings, citations, and directory submissions.',
+      hasGuestColumn: true,
+      rows: [
+        {
+          key: 'edit-location-information',
+          title: 'Edit Location Information',
+          description: 'Allow users to edit business location details used for directory and citation listings.',
+          guestEnabled: true,
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'delete-archive-listings',
+          title: 'Delete / Archive Listings',
+          description: 'Allow users to delete or archive existing directory listings.',
+          guestEnabled: false,
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'export-reporting',
+          title: 'Export Reporting',
+          description: 'Allow users to export directory listing reports and status summaries.',
+          guestEnabled: false,
+          memberEnabled: false,
+          adminEnabled: true
+        }
+      ]
+    },
+    {
+      key: 'client-management-permissions',
+      title: 'Client Management Permissions',
+      description:
+        'Manage access to business locations, including viewing, editing, syncing, and performance insights.',
+      hasGuestColumn: false,
+      rows: [
+        {
+          key: 'add-new-client',
+          title: 'Add New Client',
+          description: 'Allow users to add and connect new business locations.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 'edit-location-details',
+          title: 'Edit Location Details (NAP, Category, Services)',
+          description:
+            'Allow users to update assigned location information including categories, services, and business details.',
+          memberEnabled: false,
+          adminEnabled: true
+        },
+        {
+          key: 'remove-client',
+          title: 'Remove Client',
+          description: 'Allow users to permanently remove assigned location from the workspace.',
+          memberEnabled: true,
+          adminEnabled: true
+        },
+        {
+          key: 're-sync-location',
+          title: 'Re-Sync Location',
+          description: 'Allow users to refresh and re-sync assigned location data from Google Business Profile.',
+          memberEnabled: false,
+          adminEnabled: true
+        },
+        {
+          key: 'view-performance-dashboard',
+          title: 'View Performance Dashboard',
+          description:
+            'Allow users to view analytics, rankings, and performance insights for assigned locations',
+          memberEnabled: false,
+          adminEnabled: true
+        }
+      ]
+    }
+  ]
+};
 
 function isUniqueViolation(err) {
   return err && err.code === 'P2002';
+}
+
+function cloneDefaultPermissionsSettings() {
+  return JSON.parse(JSON.stringify(DEFAULT_PERMISSIONS_SETTINGS));
+}
+
+function normalizePermissionRow(section, row) {
+  if (typeof row !== 'object' || row === null) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid permission row.');
+  }
+
+  return {
+    key: String(row.key || '').trim(),
+    title: String(row.title || '').trim(),
+    description: String(row.description || '').trim(),
+    ...(section.hasGuestColumn ? { guestEnabled: Boolean(row.guestEnabled) } : {}),
+    memberEnabled: Boolean(row.memberEnabled),
+    adminEnabled: true
+  };
+}
+
+function normalizePermissionSection(section) {
+  if (typeof section !== 'object' || section === null) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid permission section.');
+  }
+
+  const rows = Array.isArray(section.rows) ? section.rows.map((row) => normalizePermissionRow(section, row)) : [];
+
+  if (!rows.length) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Permission sections must include rows.');
+  }
+
+  return {
+    key: String(section.key || '').trim(),
+    title: String(section.title || '').trim(),
+    description: String(section.description || '').trim(),
+    hasGuestColumn: Boolean(section.hasGuestColumn),
+    rows
+  };
+}
+
+function normalizePermissionsPayload(payload) {
+  const sections = Array.isArray(payload?.sections) ? payload.sections.map(normalizePermissionSection) : null;
+
+  if (!sections || !sections.length) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'sections is required.');
+  }
+
+  return { sections };
+}
+
+function parseStoredPermissionsValue(rawValue) {
+  if (!rawValue) {
+    return cloneDefaultPermissionsSettings();
+  }
+
+  if (typeof rawValue === 'string') {
+    try {
+      return normalizePermissionsPayload(JSON.parse(rawValue));
+    } catch (_error) {
+      return cloneDefaultPermissionsSettings();
+    }
+  }
+
+  return normalizePermissionsPayload(rawValue);
 }
 
 function mapUserSummary(user) {
@@ -32,6 +384,42 @@ function mapUserSummary(user) {
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   };
+}
+
+function buildArchivedUserEmail(email, userId) {
+  const local = String(email || '')
+    .split('@')[0]
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    .toLowerCase() || 'user';
+  const suffix = `${Date.now()}-${String(userId)}`;
+  return `${local}+deleted-${suffix}@archived.local`;
+}
+
+function parseInvitationLocations(locationsJson) {
+  if (!locationsJson) {
+    return [];
+  }
+
+  if (Array.isArray(locationsJson)) {
+    return locationsJson
+      .map((location) => String(location || '').trim())
+      .filter(Boolean);
+  }
+
+  if (typeof locationsJson === 'string') {
+    try {
+      const parsed = JSON.parse(locationsJson);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((location) => String(location || '').trim())
+          .filter(Boolean);
+      }
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 async function listUsers({ db, page = 1, limit = 20 }) {
@@ -96,10 +484,58 @@ async function listUsers({ db, page = 1, limit = 20 }) {
   };
 }
 
+async function listPendingInvitations({ db }) {
+  const rows = await db.$queryRaw`
+    SELECT
+      ui.id,
+      ui.email,
+      ui.role_code,
+      ui.locations_json,
+      ui.status,
+      ui.created_at,
+      ui.updated_at,
+      ui.sent_at,
+      ui.expires_at,
+      inviter.first_name AS invited_by_first_name,
+      inviter.last_name AS invited_by_last_name,
+      inviter.email AS invited_by_email
+    FROM user_invitations ui
+    LEFT JOIN users inviter ON inviter.id = ui.invited_by
+    WHERE ui.status = 'PENDING'
+      AND ui.expires_at > NOW()
+    ORDER BY ui.id DESC
+  `;
+
+  const invitations = rows.map((row) => {
+    const invitedByName = [row.invited_by_first_name, row.invited_by_last_name]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    return {
+      id: Number(row.id),
+      email: String(row.email || '').trim(),
+      role: String(row.role_code || '').trim().toUpperCase(),
+      locations: parseInvitationLocations(row.locations_json),
+      status: String(row.status || '').trim().toUpperCase(),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      sentAt: row.sent_at,
+      expiresAt: row.expires_at,
+      invitedBy: invitedByName || String(row.invited_by_email || '').trim() || null
+    };
+  });
+
+  return {
+    invitations
+  };
+}
+
 async function createUser({ db, actorUserId, payload }) {
   const email = String(payload.email || '').toLowerCase().trim();
   const password = payload.password;
-  const role = payload.role || 'TEAM_MEMBER';
+  const role = normalizeRole(payload.role || 'GUEST');
 
   if (!email || !password) {
     throw new AppError(400, 'VALIDATION_ERROR', 'email and password are required.');
@@ -154,10 +590,11 @@ async function updateUser({ db, userId, payload }) {
     patch.email = String(payload.email).toLowerCase().trim();
   }
   if (payload.role !== undefined) {
-    if (!ALLOWED_ROLES.has(payload.role)) {
+    const normalizedRole = normalizeRole(payload.role);
+    if (!ALLOWED_ROLES.has(normalizedRole)) {
       throw new AppError(400, 'VALIDATION_ERROR', 'Invalid role value.');
     }
-    patch.roleCode = payload.role;
+    patch.roleCode = normalizedRole;
   }
   if (payload.status !== undefined) {
     if (!ALLOWED_STATUS.has(payload.status)) {
@@ -276,7 +713,7 @@ async function updateOwnProfile({ db, userId, payload }) {
 }
 
 async function updateUserRole({ db, userId, role }) {
-  const nextRole = String(role || '').trim().toUpperCase();
+  const nextRole = normalizeRole(role);
   if (!ALLOWED_ROLES.has(nextRole)) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Invalid role value.');
   }
@@ -451,7 +888,7 @@ function normalizeMembers(memberList) {
   const mapped = memberList
     .map((member) => ({
       email: String(member?.email || '').trim().toLowerCase(),
-      role: normalizeRole(member?.role || 'TEAM_MEMBER')
+      role: normalizeRole(member?.role || 'GUEST')
     }))
     .filter((member) => member.email);
 
@@ -473,7 +910,9 @@ function normalizeRole(roleValue) {
     .replace(/[\s-]+/g, '_');
 
   if (cleaned === 'TEAM_MEMBER' || cleaned === 'TEAMMEMBER') return 'TEAM_MEMBER';
+  if (cleaned === 'MEMBER') return 'TEAM_MEMBER';
   if (cleaned === 'ADMIN') return 'ADMIN';
+  if (cleaned === 'GUEST') return 'GUEST';
   return cleaned;
 }
 
@@ -518,7 +957,7 @@ async function inviteUsers({ db, env, actorUserId, payload }) {
   const emails = members.map((member) => member.email);
   const existingUsers = await db.user.findMany({
     where: { email: { in: emails } },
-    select: { email: true }
+    select: { id: true, email: true, status: true }
   });
   const existingInvitations = await db.userInvitation.findMany({
     where: {
@@ -533,7 +972,27 @@ async function inviteUsers({ db, env, actorUserId, payload }) {
     orderBy: { id: 'desc' }
   });
 
-  const existingSet = new Set(existingUsers.map((user) => user.email.toLowerCase()));
+  for (const user of existingUsers) {
+    const status = String(user.status || '').trim().toUpperCase();
+
+    if (status !== 'DELETED') {
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    await db.user.update({
+      where: { id: BigInt(user.id) },
+      data: {
+        email: buildArchivedUserEmail(user.email, user.id)
+      }
+    });
+  }
+
+  const blockingExistingSet = new Set(
+    existingUsers
+      .filter((user) => String(user.status || '').trim().toUpperCase() !== 'DELETED')
+      .map((user) => user.email.toLowerCase())
+  );
   const invitationStateByEmail = new Map();
   for (const row of existingInvitations) {
     const key = row.email.toLowerCase();
@@ -563,17 +1022,12 @@ async function inviteUsers({ db, env, actorUserId, payload }) {
       continue;
     }
 
-    if (existingSet.has(email)) {
+    if (blockingExistingSet.has(email)) {
       results.push({ email, status: 'SKIPPED_USER_EXISTS' });
       // eslint-disable-next-line no-continue
       continue;
     }
     const inviteState = invitationStateByEmail.get(email);
-    if (inviteState?.hasAccepted) {
-      results.push({ email, status: 'SKIPPED_INVITATION_ALREADY_ACCEPTED' });
-      // eslint-disable-next-line no-continue
-      continue;
-    }
     if (inviteState?.hasPendingValid) {
       results.push({ email, status: 'SKIPPED_PENDING_INVITATION_EXISTS' });
       // eslint-disable-next-line no-continue
@@ -631,8 +1085,42 @@ async function inviteUsers({ db, env, actorUserId, payload }) {
   return { summary, locations, results };
 }
 
+async function getPermissionsSettings({ db }) {
+  const rows = await db.$queryRaw`
+    SELECT value_json
+    FROM app_settings
+    WHERE setting_key = ${PERMISSIONS_SETTINGS_KEY}
+    LIMIT 1
+  `;
+  const value = Array.isArray(rows) && rows.length > 0 ? rows[0].value_json : null;
+  const settings = parseStoredPermissionsValue(value);
+
+  if (!value) {
+    await db.$executeRaw`
+      INSERT INTO app_settings (setting_key, value_json, created_at, updated_at)
+      VALUES (${PERMISSIONS_SETTINGS_KEY}, ${JSON.stringify(settings)}, NOW(), NOW())
+      ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = NOW()
+    `;
+  }
+
+  return settings;
+}
+
+async function updatePermissionsSettings({ db, payload }) {
+  const settings = normalizePermissionsPayload(payload);
+
+  await db.$executeRaw`
+    INSERT INTO app_settings (setting_key, value_json, created_at, updated_at)
+    VALUES (${PERMISSIONS_SETTINGS_KEY}, ${JSON.stringify(settings)}, NOW(), NOW())
+    ON DUPLICATE KEY UPDATE value_json = VALUES(value_json), updated_at = NOW()
+  `;
+
+  return { success: true, settings };
+}
+
 module.exports = {
   listUsers,
+  listPendingInvitations,
   createUser,
   updateUser,
   updateOwnProfile,
@@ -641,5 +1129,7 @@ module.exports = {
   changeOwnPassword,
   updateAvatar,
   softDeleteUser,
-  inviteUsers
+  inviteUsers,
+  getPermissionsSettings,
+  updatePermissionsSettings
 };

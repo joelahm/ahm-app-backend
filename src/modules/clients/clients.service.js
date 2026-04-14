@@ -736,6 +736,94 @@ async function createClientProject({ db, actorUserId, clientId, payload }) {
   return mapClientProject(created);
 }
 
+async function updateClientProject({ db, clientId, projectId, payload }) {
+  const existingProject = await db.clientProject.findFirst({
+    where: {
+      id: BigInt(projectId),
+      clientId: BigInt(clientId)
+    },
+    include: PROJECT_INCLUDE
+  });
+
+  if (!existingProject) {
+    throw new AppError(404, 'NOT_FOUND', 'Project not found for this client.');
+  }
+
+  const projectName = payload.project === undefined
+    ? undefined
+    : String(payload.project || '').trim();
+  const phase = payload.phase === undefined
+    ? undefined
+    : String(payload.phase || '').trim();
+  const progress = payload.progress === undefined
+    ? undefined
+    : String(payload.progress || '').trim();
+  const clientSuccessManagerId = payload.clientSuccessManagerId === undefined
+    ? undefined
+    : parseOptionalUserId(payload.clientSuccessManagerId, 'clientSuccessManagerId');
+  const accountManagerId = payload.accountManagerId === undefined
+    ? undefined
+    : parseOptionalUserId(payload.accountManagerId, 'accountManagerId');
+
+  const patch = {
+    project: projectName,
+    phase,
+    progress,
+    clientSuccessManagerId,
+    accountManagerId
+  };
+
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) {
+      delete patch[key];
+    }
+  }
+
+  if (!Object.keys(patch).length) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'No supported project fields to update.');
+  }
+
+  let updated;
+  try {
+    updated = await db.clientProject.update({
+      where: { id: BigInt(projectId) },
+      data: patch,
+      include: PROJECT_INCLUDE
+    });
+  } catch (err) {
+    if (err.code === 'P2003') {
+      throw new AppError(
+        400,
+        'VALIDATION_ERROR',
+        'clientSuccessManagerId/accountManagerId must reference existing users.'
+      );
+    }
+    throw err;
+  }
+
+  return mapClientProject(updated);
+}
+
+async function deleteClientProject({ db, clientId, projectId }) {
+  const existingProject = await db.clientProject.findFirst({
+    where: {
+      id: BigInt(projectId),
+      clientId: BigInt(clientId)
+    },
+    select: { id: true }
+  });
+
+  if (!existingProject) {
+    throw new AppError(404, 'NOT_FOUND', 'Project not found for this client.');
+  }
+
+  await db.clientProject.delete({
+    where: { id: BigInt(projectId) }
+  });
+
+  return { id: Number(existingProject.id) };
+}
+
 async function createClientCitation({ db, actorUserId, clientId, payload }) {
   const clientExists = await db.client.findUnique({
     where: { id: BigInt(clientId) },
@@ -907,5 +995,7 @@ module.exports = {
   updateClientCitation,
   deleteClientCitation,
   createClientProject,
+  updateClientProject,
+  deleteClientProject,
   listClientProjects
 };

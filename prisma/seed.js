@@ -20,6 +20,15 @@ async function main() {
       description: 'Default application user role'
     }
   });
+
+  await prisma.role.upsert({
+    where: { code: 'GUEST' },
+    update: { description: 'Guest role with limited permissions' },
+    create: {
+      code: 'GUEST',
+      description: 'Guest role with limited permissions'
+    }
+  });
 }
 
 main()

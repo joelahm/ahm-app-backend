@@ -16,6 +16,12 @@ const { clientsRouter } = require('./modules/clients/clients.routes');
 const { projectsRouter } = require('./modules/projects/projects.routes');
 const { integrationsRouter } = require('./modules/integrations/integrations.routes');
 const { scansRouter } = require('./modules/scans/scans.routes');
+const { projectTemplatesRouter } = require('./modules/project-templates/project-templates.routes');
+const { aiPromptsRouter } = require('./modules/ai-prompts/ai-prompts.routes');
+const { citationDatabaseRouter } = require('./modules/citation-database/citation-database.routes');
+const { schemaGeneratorSettingsRouter } = require('./modules/schema-generator-settings/schema-generator-settings.routes');
+const { generatedSchemasRouter } = require('./modules/generated-schemas/generated-schemas.routes');
+const { keywordContentListsRouter } = require('./modules/keyword-content-lists/keyword-content-lists.routes');
 const { healthRouter } = require('./modules/health/health.routes');
 const { notFoundHandler } = require('./middleware/notFoundHandler');
 const { errorHandler } = require('./middleware/errorHandler');
@@ -82,6 +88,12 @@ function createAuthApp() {
   app.use('/api/v1/projects', projectsRouter);
   app.use('/api/v1/integrations', integrationsRouter);
   app.use('/api/v1/scans', scansRouter);
+  app.use('/api/v1/project-templates', projectTemplatesRouter);
+  app.use('/api/v1/ai-prompts', aiPromptsRouter);
+  app.use('/api/v1/citation-database', citationDatabaseRouter);
+  app.use('/api/v1/schema-generator-settings', schemaGeneratorSettingsRouter);
+  app.use('/api/v1/generated-schemas', generatedSchemasRouter);
+  app.use('/api/v1/keyword-content-lists', keywordContentListsRouter);
   app.use('/api/v1', healthRouter);
 
   app.use(notFoundHandler);

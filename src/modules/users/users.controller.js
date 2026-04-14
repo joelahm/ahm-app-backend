@@ -49,6 +49,18 @@ async function listUsers(req, res, next) {
   }
 }
 
+async function listPendingInvitations(req, res, next) {
+  try {
+    const data = await usersService.listPendingInvitations({
+      db: req.app.locals.db
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function createUser(req, res, next) {
   try {
     const user = await usersService.createUser({
@@ -196,8 +208,34 @@ async function inviteUsers(req, res, next) {
   }
 }
 
+async function getPermissionsSettings(req, res, next) {
+  try {
+    const data = await usersService.getPermissionsSettings({
+      db: req.app.locals.db
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function patchPermissionsSettings(req, res, next) {
+  try {
+    const data = await usersService.updatePermissionsSettings({
+      db: req.app.locals.db,
+      payload: req.body || {}
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   listUsers,
+  listPendingInvitations,
   createUser,
   patchMe,
   patchUser,
@@ -206,5 +244,7 @@ module.exports = {
   patchMyPassword,
   patchAvatar,
   deleteUser,
-  inviteUsers
+  inviteUsers,
+  getPermissionsSettings,
+  patchPermissionsSettings
 };

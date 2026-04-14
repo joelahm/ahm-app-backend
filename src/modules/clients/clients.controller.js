@@ -19,6 +19,14 @@ function readCitationId(req) {
   return id;
 }
 
+function readProjectId(req) {
+  const id = Number(req.params.projectId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid project id.');
+  }
+  return id;
+}
+
 async function listClients(req, res, next) {
   try {
     const clients = await clientsService.listClients({
@@ -132,6 +140,39 @@ async function createClientProject(req, res, next) {
   }
 }
 
+async function deleteClientProject(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const projectId = readProjectId(req);
+    const deletedProject = await clientsService.deleteClientProject({
+      db: req.app.locals.db,
+      clientId,
+      projectId
+    });
+
+    res.status(200).json({ project: deletedProject });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function patchClientProject(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const projectId = readProjectId(req);
+    const project = await clientsService.updateClientProject({
+      db: req.app.locals.db,
+      clientId,
+      projectId,
+      payload: req.body || {}
+    });
+
+    res.status(200).json({ project });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function createClientCitation(req, res, next) {
   try {
     const clientId = readClientId(req);
@@ -208,5 +249,7 @@ module.exports = {
   patchClientCitation,
   deleteClientCitation,
   createClientProject,
+  patchClientProject,
+  deleteClientProject,
   listClientProjects
 };

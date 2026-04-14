@@ -1,10 +1,28 @@
 const { AppError } = require('../../lib/errors');
-const ALLOWED_TASK_STATUSES = new Set([
-  'TODO',
-  'IN PROGRESS',
-  'DONE',
-  'ON HOLD'
-]);
+const DEFAULT_TASK_STATUSES = ['To Do', 'In Progress', 'On Hold', 'Completed'];
+const PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY = 'project_template_status_options';
+
+function normalizeTaskStatusLabel(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (normalized === 'done' || normalized === 'completed') {
+    return 'Completed';
+  }
+
+  if (normalized === 'in progress') {
+    return 'In Progress';
+  }
+
+  if (normalized === 'on hold') {
+    return 'On Hold';
+  }
+
+  if (normalized === 'to do' || normalized === 'todo') {
+    return 'To Do';
+  }
+
+  return null;
+}
 
 function parseOptionalUserId(value, fieldName) {
   if (value === undefined || value === null || value === '') return null;
@@ -24,21 +42,53 @@ function parseOptionalDate(value, fieldName) {
   return parsed;
 }
 
-function parseTaskStatus(value) {
+async function getAllowedTaskStatuses(db) {
+  const setting = await db.appSetting.findUnique({
+    where: { key: PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY },
+    select: { valueJson: true }
+  });
+
+  const rawOptions = Array.isArray(setting?.valueJson?.statusOptions)
+    ? setting.valueJson.statusOptions
+    : [];
+  const normalized = rawOptions
+    .map((item) => normalizeTaskStatusLabel(item))
+    .filter(Boolean);
+
+  const unique = Array.from(new Set(normalized));
+  const ordered = DEFAULT_TASK_STATUSES.filter((status) => unique.includes(status));
+
+  return ordered.length ? ordered : DEFAULT_TASK_STATUSES;
+}
+
+async function parseTaskStatus(db, value) {
   if (value === undefined || value === null || value === '') {
-    return 'TODO';
+    return DEFAULT_TASK_STATUSES[0];
   }
 
-  const normalized = String(value).trim().toUpperCase();
-  if (!ALLOWED_TASK_STATUSES.has(normalized)) {
+  const normalized = normalizeTaskStatusLabel(value);
+  if (!normalized) {
     throw new AppError(
       400,
       'VALIDATION_ERROR',
-      'status must be TODO, IN PROGRESS, DONE, or ON HOLD.'
+      `status must be one of: ${DEFAULT_TASK_STATUSES.join(', ')}.`
     );
   }
 
-  return normalized;
+  const allowedTaskStatuses = await getAllowedTaskStatuses(db);
+  const matchedStatus = allowedTaskStatuses.find(
+    (status) => status === normalized
+  );
+
+  if (!matchedStatus) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      `status must be one of: ${allowedTaskStatuses.join(', ')}.`
+    );
+  }
+
+  return matchedStatus;
 }
 
 function mapTask(task) {
@@ -97,11 +147,30 @@ function mapComment(comment) {
   };
 }
 
+function mapProjectComment(comment) {
+  return {
+    id: Number(comment.id),
+    projectId: Number(comment.projectId),
+    comment: comment.comment,
+    createdBy: Number(comment.createdBy),
+    author: comment.creator
+      ? {
+        id: Number(comment.creator.id),
+        firstName: comment.creator.firstName ?? null,
+        lastName: comment.creator.lastName ?? null,
+        avatar: comment.creator.avatarUrl ?? null
+      }
+      : null,
+    createdAt: comment.createdAt,
+    updatedAt: comment.updatedAt
+  };
+}
+
 async function createTask({ db, actorUserId, projectId, payload }) {
   const taskName = String(payload.taskName || payload.task || '').trim();
   const projectType = payload.projectType === undefined ? null : String(payload.projectType || '').trim() || null;
   const description = payload.description === undefined ? null : String(payload.description || '').trim() || null;
-  const status = parseTaskStatus(payload.status);
+  const status = await parseTaskStatus(db, payload.status);
   const priority = payload.priority === undefined ? 'MEDIUM' : String(payload.priority || '').trim() || 'MEDIUM';
   const startDate = parseOptionalDate(payload.startDate, 'startDate');
   const dueDate = parseOptionalDate(payload.dueDate, 'dueDate');
@@ -187,7 +256,7 @@ async function updateTask({ db, taskId, payload }) {
     : String(payload.description || '').trim() || null;
   const status = payload.status === undefined
     ? undefined
-    : parseTaskStatus(payload.status);
+    : await parseTaskStatus(db, payload.status);
   const priority = payload.priority === undefined
     ? undefined
     : String(payload.priority || '').trim() || 'MEDIUM';
@@ -337,6 +406,7 @@ async function listTasksGroupedByProject({ db, clientId }) {
         projectId: Number(row.project.id),
         projectName: row.project.project,
         clientId: Number(row.project.clientId),
+        clientName: row.project.client ? row.project.client.client : null,
         tasks: []
       });
     }
@@ -447,6 +517,88 @@ async function deleteTaskComment({ db, actorUserId, commentId }) {
   return { success: true };
 }
 
+async function createProjectComment({ db, actorUserId, projectId, payload }) {
+  const text = String(payload.comment || '').trim();
+  if (!text) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'comment is required.');
+  }
+
+  const projectExists = await db.clientProject.findUnique({
+    where: { id: BigInt(projectId) },
+    select: { id: true }
+  });
+  if (!projectExists) {
+    throw new AppError(404, 'NOT_FOUND', 'Project not found.');
+  }
+
+  const created = await db.projectComment.create({
+    data: {
+      projectId: BigInt(projectId),
+      comment: text,
+      createdBy: BigInt(actorUserId)
+    },
+    include: {
+      creator: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true
+        }
+      }
+    }
+  });
+
+  return mapProjectComment(created);
+}
+
+async function listProjectComments({ db, projectId }) {
+  const projectExists = await db.clientProject.findUnique({
+    where: { id: BigInt(projectId) },
+    select: { id: true }
+  });
+  if (!projectExists) {
+    throw new AppError(404, 'NOT_FOUND', 'Project not found.');
+  }
+
+  const comments = await db.projectComment.findMany({
+    where: { projectId: BigInt(projectId) },
+    include: {
+      creator: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true
+        }
+      }
+    },
+    orderBy: { id: 'asc' }
+  });
+
+  return comments.map(mapProjectComment);
+}
+
+async function deleteProjectComment({ db, actorUserId, commentId }) {
+  const existing = await db.projectComment.findUnique({
+    where: { id: BigInt(commentId) },
+    select: { id: true, createdBy: true }
+  });
+  if (!existing) {
+    throw new AppError(404, 'NOT_FOUND', 'Comment not found.');
+  }
+
+  if (Number(existing.createdBy) !== Number(actorUserId)) {
+    throw new AppError(403, 'FORBIDDEN', 'You can only delete your own comment.');
+  }
+
+  await db.projectComment.delete({
+    where: { id: BigInt(commentId) }
+  });
+
+  return { success: true };
+}
+
 module.exports = {
   createTask,
   updateTask,
@@ -454,5 +606,8 @@ module.exports = {
   deleteTask,
   createTaskComment,
   listTaskComments,
-  deleteTaskComment
+  deleteTaskComment,
+  createProjectComment,
+  listProjectComments,
+  deleteProjectComment
 };

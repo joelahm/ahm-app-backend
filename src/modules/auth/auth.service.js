@@ -27,6 +27,17 @@ function mapUser(user) {
   };
 }
 
+function buildArchivedCredentialsIdentityValue(email, identityId, userId) {
+  const localPart = String(email || '')
+    .split('@')[0]
+    .replace(/[^a-zA-Z0-9._-]/g, '')
+    .toLowerCase() || 'user';
+  const suffix = `deleted-${Date.now()}-${String(identityId)}-${String(userId)}`;
+  const archived = `${localPart}+${suffix}@archived.local`;
+
+  return archived.slice(0, 255);
+}
+
 async function getActiveUserByEmail(db, email) {
   const user = await db.user.findUnique({
     where: { email },
@@ -84,6 +95,47 @@ async function persistRefreshToken({ db, userId, refresh, sessionId, tokenFamily
       isRevoked: false
     }
   });
+}
+
+async function releaseDeletedCredentialsIdentityConflict({ tx, email }) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  if (!normalizedEmail) {
+    return;
+  }
+
+  const rows = await tx.$queryRaw`
+    SELECT ai.id, ai.user_id, u.status
+    FROM auth_identities ai
+    LEFT JOIN users u ON u.id = ai.user_id
+    WHERE ai.provider = 'credentials'
+      AND ai.provider_user_id = ${normalizedEmail}
+    LIMIT 1
+  `;
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return;
+  }
+
+  const conflict = rows[0];
+  const linkedStatus = String(conflict.status || '').trim().toUpperCase();
+
+  if (linkedStatus && linkedStatus !== 'DELETED') {
+    throw new AppError(409, 'INVITATION_ALREADY_USED', 'Invitation is no longer valid.');
+  }
+
+  const replacement = buildArchivedCredentialsIdentityValue(
+    normalizedEmail,
+    conflict.id,
+    conflict.user_id
+  );
+
+  await tx.$executeRaw`
+    UPDATE auth_identities
+    SET provider_user_id = ${replacement},
+        provider_email = ${replacement},
+        updated_at = NOW()
+    WHERE id = ${BigInt(conflict.id)}
+  `;
 }
 
 async function login({ db, env, email, password, ipAddress, userAgent }) {
@@ -350,6 +402,11 @@ async function acceptInvitation({ db, env, token, firstName, lastName, password,
       }
     });
 
+    await releaseDeletedCredentialsIdentityConflict({
+      tx,
+      email: createdUser.email
+    });
+
     await tx.$executeRaw`
       INSERT INTO auth_identities
       (user_id, provider, provider_user_id, provider_email, linked_at, created_at, updated_at)
@@ -484,6 +541,11 @@ async function registerInvitedUser({
       }
     });
 
+    await releaseDeletedCredentialsIdentityConflict({
+      tx,
+      email: createdUser.email
+    });
+
     await tx.$executeRaw`
       INSERT INTO auth_identities
       (user_id, provider, provider_user_id, provider_email, linked_at, created_at, updated_at)
@@ -546,9 +608,9 @@ async function checkPendingInvitationByEmail({ db, email }) {
 
   const existingUser = await db.user.findUnique({
     where: { email: normalizedEmail },
-    select: { id: true }
+    select: { id: true, status: true, isActive: true }
   });
-  if (existingUser) {
+  if (existingUser && String(existingUser.status || '').toUpperCase() !== 'DELETED') {
     return {
       email: normalizedEmail,
       canInvite: false,
@@ -577,18 +639,7 @@ async function checkPendingInvitationByEmail({ db, email }) {
     const expiresAt = new Date(row.expiresAt);
     return !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > Date.now();
   }) || null;
-  const hasAccepted = rows.some((row) => row.status === 'ACCEPTED');
-
   if (!validInvite) {
-    if (hasAccepted) {
-      return {
-        email: normalizedEmail,
-        canInvite: false,
-        reason: 'INVITATION_ALREADY_ACCEPTED',
-        hasValidPendingInvitation: false
-      };
-    }
-
     return {
       email: normalizedEmail,
       canInvite: true,
