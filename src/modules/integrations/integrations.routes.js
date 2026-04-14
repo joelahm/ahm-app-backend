@@ -11,6 +11,7 @@ router.use(requireRole('ADMIN'));
 router.post('/dataforseo/rankings', integrationsController.dataForSeoRankings);
 router.post('/dataforseo/google-maps-competitors', integrationsController.dataForSeoMapsCompetitors);
 router.post('/dataforseo/gbp-posts', integrationsController.dataForSeoGbpPosts);
+router.post('/dataforseo/google-ads-reference/sync', integrationsController.syncDataForSeoGoogleAdsReferenceData);
 router.post('/dataforseo/google-ads-locations/sync', integrationsController.syncDataForSeoGoogleAdsLocations);
 router.get('/dataforseo/google-ads-languages', integrationsController.listDataForSeoKeywordLanguages);
 router.get('/dataforseo/google-ads-locations/countries', integrationsController.listDataForSeoKeywordCountries);

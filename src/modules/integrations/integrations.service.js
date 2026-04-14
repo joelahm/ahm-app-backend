@@ -8,7 +8,8 @@ const DATAFORSEO_ENDPOINTS = {
   keywordOverview: '/v3/dataforseo_labs/google/keyword_overview/live',
   relatedKeywords: '/v3/dataforseo_labs/google/related_keywords/live',
   keywordSuggestions: '/v3/dataforseo_labs/google/keyword_suggestions/live',
-  googleAdsLocations: '/v3/keywords_data/google_ads/locations'
+  googleAdsLocations: '/v3/keywords_data/google_ads/locations',
+  googleAdsLanguages: '/v3/keywords_data/google_ads/languages'
 };
 
 const SERPAPI_ENDPOINTS = {
@@ -226,6 +227,20 @@ function mapGoogleAdsLocationRow(item) {
   };
 }
 
+function mapGoogleAdsLanguageRow(item) {
+  const languageCode = String(item?.language_code || '').trim();
+  const languageName = String(item?.language_name || '').trim();
+
+  if (!languageCode || !languageName) {
+    return null;
+  }
+
+  return {
+    languageCode,
+    languageName,
+  };
+}
+
 async function syncDataForSeoGoogleAdsLocations({ db, env, requestedBy, forceRefresh = false }) {
   requireDataForSeoConfig(env);
 
@@ -289,6 +304,69 @@ async function syncDataForSeoGoogleAdsLocations({ db, env, requestedBy, forceRef
   };
 }
 
+async function syncDataForSeoGoogleAdsLanguages({ db, env, requestedBy, forceRefresh = false }) {
+  requireDataForSeoConfig(env);
+
+  const existingCount = await db.dataForSeoGoogleAdsLanguage.count();
+  if (existingCount > 0 && !forceRefresh) {
+    return {
+      synced: false,
+      totalLanguages: existingCount,
+    };
+  }
+
+  const endpoint = `${env.integrations.dataForSeo.baseUrl}${DATAFORSEO_ENDPOINTS.googleAdsLanguages}`;
+  const requestPayload = [];
+  const { response, payload: responsePayload } = await getJson(endpoint, {
+    headers: {
+      Authorization: `Basic ${base64BasicAuth(env.integrations.dataForSeo.login, env.integrations.dataForSeo.password)}`
+    }
+  });
+
+  const success = response.ok;
+  await persistExternalApiLog({
+    db,
+    provider: 'DATAFORSEO',
+    operation: 'GOOGLE_ADS_LANGUAGES_SYNC',
+    cacheNamespace: 'DATAFORSEO_GOOGLE_ADS_LANGUAGES_SYNC',
+    requestHash: buildRequestHash('DATAFORSEO_GOOGLE_ADS_LANGUAGES_SYNC', requestPayload),
+    clientId: null,
+    requestedBy,
+    endpoint,
+    requestMethod: 'GET',
+    requestPayload,
+    responseStatusCode: response.status,
+    responsePayload,
+    isSuccess: success,
+    errorMessage: success ? null : 'DataForSEO Google Ads languages request failed.'
+  });
+
+  if (!success) {
+    throw new AppError(502, 'UPSTREAM_API_ERROR', 'DataForSEO Google Ads languages request failed.', {
+      provider: 'DATAFORSEO',
+      operation: 'GOOGLE_ADS_LANGUAGES_SYNC',
+      upstreamStatus: response.status
+    });
+  }
+
+  const rows = normalizeDataForSeoItems(responsePayload)
+    .map(mapGoogleAdsLanguageRow)
+    .filter(Boolean);
+
+  await db.$transaction([
+    db.dataForSeoGoogleAdsLanguage.deleteMany(),
+    db.dataForSeoGoogleAdsLanguage.createMany({
+      data: rows,
+      skipDuplicates: true,
+    }),
+  ]);
+
+  return {
+    synced: true,
+    totalLanguages: rows.length,
+  };
+}
+
 async function ensureDataForSeoGoogleAdsLocations({ db, env, requestedBy }) {
   const count = await db.dataForSeoGoogleAdsLocation.count();
   if (count > 0) {
@@ -299,7 +377,31 @@ async function ensureDataForSeoGoogleAdsLocations({ db, env, requestedBy }) {
   return result.totalLocations;
 }
 
-async function listDataForSeoKeywordLanguages({ db }) {
+async function ensureDataForSeoGoogleAdsLanguages({ db, env, requestedBy }) {
+  const count = await db.dataForSeoGoogleAdsLanguage.count();
+  if (count > 0) {
+    return count;
+  }
+
+  const result = await syncDataForSeoGoogleAdsLanguages({ db, env, requestedBy });
+  return result.totalLanguages;
+}
+
+async function syncDataForSeoGoogleAdsReferenceData({ db, env, requestedBy, forceRefresh = false }) {
+  const [locations, languages] = await Promise.all([
+    syncDataForSeoGoogleAdsLocations({ db, env, requestedBy, forceRefresh }),
+    syncDataForSeoGoogleAdsLanguages({ db, env, requestedBy, forceRefresh }),
+  ]);
+
+  return {
+    languages,
+    locations,
+  };
+}
+
+async function listDataForSeoKeywordLanguages({ db, env, requestedBy }) {
+  await ensureDataForSeoGoogleAdsLanguages({ db, env, requestedBy });
+
   const languages = await db.dataForSeoGoogleAdsLanguage.findMany({
     orderBy: { languageName: 'asc' },
     select: {
@@ -1725,6 +1827,7 @@ async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
 }
 
 module.exports = {
+  syncDataForSeoGoogleAdsReferenceData,
   syncDataForSeoGoogleAdsLocations,
   listDataForSeoKeywordLanguages,
   listDataForSeoKeywordCountries,

@@ -56,6 +56,20 @@ async function syncDataForSeoGoogleAdsLocations(req, res, next) {
   }
 }
 
+async function syncDataForSeoGoogleAdsReferenceData(req, res, next) {
+  try {
+    const data = await integrationsService.syncDataForSeoGoogleAdsReferenceData({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      requestedBy: req.auth.userId,
+      forceRefresh: Boolean(req.body?.forceRefresh),
+    });
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listDataForSeoKeywordLanguages(req, res, next) {
   try {
     const data = await integrationsService.listDataForSeoKeywordLanguages({
@@ -184,6 +198,7 @@ module.exports = {
   dataForSeoRankings,
   dataForSeoMapsCompetitors,
   dataForSeoGbpPosts,
+  syncDataForSeoGoogleAdsReferenceData,
   syncDataForSeoGoogleAdsLocations,
   listDataForSeoKeywordLanguages,
   listDataForSeoKeywordCountries,
