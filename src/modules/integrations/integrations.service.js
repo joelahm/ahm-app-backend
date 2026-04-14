@@ -400,8 +400,6 @@ async function syncDataForSeoGoogleAdsReferenceData({ db, env, requestedBy, forc
 }
 
 async function listDataForSeoKeywordLanguages({ db, env, requestedBy }) {
-  await ensureDataForSeoGoogleAdsLanguages({ db, env, requestedBy });
-
   const languages = await db.dataForSeoGoogleAdsLanguage.findMany({
     orderBy: { languageName: 'asc' },
     select: {
@@ -419,8 +417,6 @@ async function listDataForSeoKeywordLanguages({ db, env, requestedBy }) {
 }
 
 async function listDataForSeoKeywordCountries({ db, env, requestedBy }) {
-  await ensureDataForSeoGoogleAdsLocations({ db, env, requestedBy });
-
   const countries = await db.dataForSeoGoogleAdsLocation.findMany({
     where: {
       locationCodeParent: null,
@@ -446,8 +442,6 @@ async function listDataForSeoKeywordCountries({ db, env, requestedBy }) {
 }
 
 async function listDataForSeoKeywordRegions({ db, env, requestedBy, payload }) {
-  await ensureDataForSeoGoogleAdsLocations({ db, env, requestedBy });
-
   const countryIsoCode = requireString(payload.countryIsoCode, 'countryIsoCode');
   const query = optionalString(payload.query);
 
@@ -481,8 +475,6 @@ async function listDataForSeoKeywordRegions({ db, env, requestedBy, payload }) {
 }
 
 async function resolveKeywordResearchLocation({ db, env, requestedBy, payload }) {
-  await ensureDataForSeoGoogleAdsLocations({ db, env, requestedBy });
-
   const locationCode = payload.locationCode === undefined || payload.locationCode === null || payload.locationCode === ''
     ? null
     : Number(payload.locationCode);
