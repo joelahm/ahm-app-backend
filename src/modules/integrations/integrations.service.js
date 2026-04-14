@@ -228,6 +228,10 @@ function mapGoogleAdsLocationRow(item) {
 }
 
 function mapGoogleAdsLanguageRow(item) {
+  if (!item || typeof item !== 'object') {
+    return null;
+  }
+
   const languageCode = String(item?.language_code || '').trim();
   const languageName = String(item?.language_name || '').trim();
 
@@ -238,6 +242,7 @@ function mapGoogleAdsLanguageRow(item) {
   return {
     languageCode,
     languageName,
+    rawData: item,
   };
 }
 

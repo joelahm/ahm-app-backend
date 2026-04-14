@@ -11,7 +11,8 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:seed": "node prisma/seed.js",
-    "bootstrap:admin": "node scripts/bootstrap-default-admin.js"
+    "bootstrap:admin": "node scripts/bootstrap-default-admin.js",
+    "sync:dataforseo:reference:from-db": "node scripts/sync-dataforseo-reference-from-db.js"
   },
   "dependencies": {
     "@prisma/client": "^6.16.2",
