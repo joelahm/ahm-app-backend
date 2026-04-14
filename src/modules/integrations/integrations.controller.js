@@ -66,7 +66,7 @@ async function syncDataForSeoGoogleAdsReferenceData(req, res, next) {
     const data = await integrationsService.syncDataForSeoGoogleAdsReferenceData({
       db: req.app.locals.db,
       env: req.app.locals.env,
-      requestedBy: req.auth.userId,
+      requestedBy: req.auth?.userId ?? null,
       forceRefresh,
     });
     res.status(200).json(data);
