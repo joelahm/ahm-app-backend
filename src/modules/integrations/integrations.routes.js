@@ -5,13 +5,14 @@ const { requireRole } = require('../../middleware/requireRole');
 
 const router = express.Router();
 
+router.get('/dataforseo/google-ads-reference/sync', integrationsController.syncDataForSeoGoogleAdsReferenceData);
+
 router.use(authenticateAccessToken);
 router.use(requireRole('ADMIN'));
 
 router.post('/dataforseo/rankings', integrationsController.dataForSeoRankings);
 router.post('/dataforseo/google-maps-competitors', integrationsController.dataForSeoMapsCompetitors);
 router.post('/dataforseo/gbp-posts', integrationsController.dataForSeoGbpPosts);
-router.get('/dataforseo/google-ads-reference/sync', integrationsController.syncDataForSeoGoogleAdsReferenceData);
 router.post('/dataforseo/google-ads-reference/sync', integrationsController.syncDataForSeoGoogleAdsReferenceData);
 router.post('/dataforseo/google-ads-locations/sync', integrationsController.syncDataForSeoGoogleAdsLocations);
 router.get('/dataforseo/google-ads-languages', integrationsController.listDataForSeoKeywordLanguages);
