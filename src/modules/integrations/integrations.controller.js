@@ -58,11 +58,16 @@ async function syncDataForSeoGoogleAdsLocations(req, res, next) {
 
 async function syncDataForSeoGoogleAdsReferenceData(req, res, next) {
   try {
+    const forceRefresh =
+      Boolean(req.body?.forceRefresh) ||
+      String(req.query?.forceRefresh || '').trim().toLowerCase() === 'true' ||
+      String(req.query?.forceRefresh || '').trim() === '1';
+
     const data = await integrationsService.syncDataForSeoGoogleAdsReferenceData({
       db: req.app.locals.db,
       env: req.app.locals.env,
       requestedBy: req.auth.userId,
-      forceRefresh: Boolean(req.body?.forceRefresh),
+      forceRefresh,
     });
     res.status(200).json(data);
   } catch (err) {
