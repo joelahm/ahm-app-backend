@@ -266,22 +266,28 @@ async function syncDataForSeoGoogleAdsLocations({ db, env, requestedBy, forceRef
   });
 
   const success = response.ok;
-  await persistExternalApiLog({
-    db,
-    provider: 'DATAFORSEO',
-    operation: 'GOOGLE_ADS_LOCATIONS_SYNC',
-    cacheNamespace: 'DATAFORSEO_GOOGLE_ADS_LOCATIONS_SYNC',
-    requestHash: buildRequestHash('DATAFORSEO_GOOGLE_ADS_LOCATIONS_SYNC', requestPayload),
-    clientId: null,
-    requestedBy,
-    endpoint,
-    requestMethod: 'GET',
-    requestPayload,
-    responseStatusCode: response.status,
-    responsePayload,
-    isSuccess: success,
-    errorMessage: success ? null : 'DataForSEO Google Ads locations request failed.'
-  });
+  try {
+    await persistExternalApiLog({
+      db,
+      provider: 'DATAFORSEO',
+      operation: 'GOOGLE_ADS_LOCATIONS_SYNC',
+      cacheNamespace: 'DATAFORSEO_GOOGLE_ADS_LOCATIONS_SYNC',
+      requestHash: buildRequestHash('DATAFORSEO_GOOGLE_ADS_LOCATIONS_SYNC', requestPayload),
+      clientId: null,
+      requestedBy,
+      endpoint,
+      requestMethod: 'GET',
+      requestPayload,
+      responseStatusCode: response.status,
+      responsePayload,
+      isSuccess: success,
+      errorMessage: success ? null : 'DataForSEO Google Ads locations request failed.'
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Logging should never block the sync operation.
+    console.warn('[integrations] failed to persist GOOGLE_ADS_LOCATIONS_SYNC log:', message);
+  }
 
   if (!success) {
     throw new AppError(502, 'UPSTREAM_API_ERROR', 'DataForSEO Google Ads locations request failed.', {
@@ -329,22 +335,28 @@ async function syncDataForSeoGoogleAdsLanguages({ db, env, requestedBy, forceRef
   });
 
   const success = response.ok;
-  await persistExternalApiLog({
-    db,
-    provider: 'DATAFORSEO',
-    operation: 'GOOGLE_ADS_LANGUAGES_SYNC',
-    cacheNamespace: 'DATAFORSEO_GOOGLE_ADS_LANGUAGES_SYNC',
-    requestHash: buildRequestHash('DATAFORSEO_GOOGLE_ADS_LANGUAGES_SYNC', requestPayload),
-    clientId: null,
-    requestedBy,
-    endpoint,
-    requestMethod: 'GET',
-    requestPayload,
-    responseStatusCode: response.status,
-    responsePayload,
-    isSuccess: success,
-    errorMessage: success ? null : 'DataForSEO Google Ads languages request failed.'
-  });
+  try {
+    await persistExternalApiLog({
+      db,
+      provider: 'DATAFORSEO',
+      operation: 'GOOGLE_ADS_LANGUAGES_SYNC',
+      cacheNamespace: 'DATAFORSEO_GOOGLE_ADS_LANGUAGES_SYNC',
+      requestHash: buildRequestHash('DATAFORSEO_GOOGLE_ADS_LANGUAGES_SYNC', requestPayload),
+      clientId: null,
+      requestedBy,
+      endpoint,
+      requestMethod: 'GET',
+      requestPayload,
+      responseStatusCode: response.status,
+      responsePayload,
+      isSuccess: success,
+      errorMessage: success ? null : 'DataForSEO Google Ads languages request failed.'
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    // Logging should never block the sync operation.
+    console.warn('[integrations] failed to persist GOOGLE_ADS_LANGUAGES_SYNC log:', message);
+  }
 
   if (!success) {
     throw new AppError(502, 'UPSTREAM_API_ERROR', 'DataForSEO Google Ads languages request failed.', {
