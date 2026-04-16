@@ -10,6 +10,9 @@ router.use(requireRole('ADMIN'));
 
 router.get('/', scansController.listScans);
 router.get('/client/:clientId/local-rankings', scansController.listClientLocalRankings);
+router.get('/client/:clientId/local-rankings/saved-keywords', scansController.getSavedLocalRankingKeywords);
+router.post('/client/:clientId/local-rankings/saved-keywords', scansController.saveLocalRankingKeywords);
+router.delete('/client/:clientId/local-rankings/saved-keywords', scansController.clearSavedLocalRankingKeywords);
 router.get('/client/:clientId/:id/comparison', scansController.getClientScanComparison);
 router.get('/client/:clientId/:id', scansController.getClientScanById);
 router.post('/', scansController.createScan);

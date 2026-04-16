@@ -3,6 +3,7 @@ const { fetchDataForSeoRankings } = require('../integrations/integrations.servic
 
 const ALLOWED_FREQUENCIES = new Set(['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY']);
 const ALLOWED_SCAN_STATUSES = new Set(['ACTIVE', 'PAUSED']);
+const LOCAL_RANKINGS_SAVED_KEYWORDS_PREFIX = 'local_rankings_saved_keywords';
 
 function parsePositiveInteger(value, fieldName) {
   const number = Number(value);
@@ -31,6 +32,24 @@ function parseStringArray(value, fieldName) {
   }
 
   return Array.from(new Set(normalized));
+}
+
+function buildSavedLocalRankingKeywordsKey({ clientId, actorUserId }) {
+  return `${LOCAL_RANKINGS_SAVED_KEYWORDS_PREFIX}:${clientId}:${actorUserId}`;
+}
+
+function parseSavedKeywordsValue(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+    )
+  );
 }
 
 function parseKeywordList(payload) {
@@ -261,6 +280,32 @@ function mapScanRun(run, includeResults = true) {
 
 function normalizeScanCandidate(item) {
   if (!item || typeof item !== 'object') return null;
+  const rawRating = item.rating;
+  const normalizedRating =
+    rawRating && typeof rawRating === 'object'
+      ? rawRating.value
+      : rawRating;
+  const normalizedReviews =
+    rawRating && typeof rawRating === 'object'
+      ? (
+        rawRating.votes_count ??
+        rawRating.votesCount ??
+        rawRating.reviews_count ??
+        rawRating.reviewsCount
+      )
+      : (item.reviews_count ?? item.reviewsCount);
+  const normalizedPhotos =
+    item.total_photos ??
+    item.photos_count ??
+    item.photosCount ??
+    (item.photos && typeof item.photos === 'object'
+      ? (item.photos.total ?? item.photos.count)
+      : null);
+  const additionalCategories = Array.isArray(item.additional_categories)
+    ? item.additional_categories
+    : [];
+  const categories = Array.isArray(item.categories) ? item.categories : [];
+
   return {
     rankAbsolute: item.rankAbsolute ?? item.rank_absolute ?? null,
     rankGroup: item.rankGroup ?? item.rank_group ?? null,
@@ -269,7 +314,21 @@ function normalizeScanCandidate(item) {
     placeId: item.placeId ?? item.place_id ?? null,
     address: item.address ?? null,
     phone: item.phone ?? null,
-    rating: item.rating?.value ?? item.rating ?? null,
+    rating: normalizedRating ?? null,
+    reviewsCount: normalizedReviews ?? null,
+    photos: normalizedPhotos ?? null,
+    primaryCategory:
+      item.category_name ??
+      item.category ??
+      item.main_category ??
+      categories[0] ??
+      null,
+    secondaryCategory:
+      additionalCategories[0] ??
+      item.secondary_category ??
+      item.second_category ??
+      categories[1] ??
+      null,
     raw: item
   };
 }
@@ -364,42 +423,7 @@ async function enrichMappedScanResults(db, results) {
       return result;
     }
 
-    const candidates = extractCandidatesFromExternalApiLog(linkedLog.responsePayload);
-    const topCandidate = candidates[0];
-    if (!topCandidate) {
-      return result;
-    }
-
-    const nextMatchedItem = result.matchedItem ?? {
-      reason: 'FALLBACK_FROM_EXTERNAL_API_LOG',
-      topCandidate: topCandidate.raw
-    };
-
-    updates.push({
-      id: result.id,
-      rankAbsolute: topCandidate.rankAbsolute,
-      rankGroup: topCandidate.rankGroup,
-      matchedTitle: result.matchedTitle ?? topCandidate.title,
-      matchedDomain: result.matchedDomain ?? topCandidate.domain,
-      matchedPlaceId: result.matchedPlaceId ?? topCandidate.placeId,
-      matchedAddress: result.matchedAddress ?? topCandidate.address,
-      matchedPhone: result.matchedPhone ?? topCandidate.phone,
-      matchedRating: result.matchedRating ?? (topCandidate.rating === null || topCandidate.rating === undefined ? null : Number(topCandidate.rating)),
-      matchedItem: nextMatchedItem
-    });
-
-    return {
-      ...result,
-      rankAbsolute: topCandidate.rankAbsolute,
-      rankGroup: topCandidate.rankGroup,
-      matchedTitle: result.matchedTitle ?? topCandidate.title,
-      matchedDomain: result.matchedDomain ?? topCandidate.domain,
-      matchedPlaceId: result.matchedPlaceId ?? topCandidate.placeId,
-      matchedAddress: result.matchedAddress ?? topCandidate.address,
-      matchedPhone: result.matchedPhone ?? topCandidate.phone,
-      matchedRating: result.matchedRating ?? (topCandidate.rating === null || topCandidate.rating === undefined ? null : Number(topCandidate.rating)),
-      matchedItem: nextMatchedItem
-    };
+    return result;
   });
 
   if (updates.length) {
@@ -466,10 +490,18 @@ function buildCreatePayload(payload) {
     throw new AppError(400, 'VALIDATION_ERROR', 'coverageUnit must be KILOMETERS or MILES.');
   }
 
+  const hasRecurrenceFields =
+    payload.frequency !== undefined ||
+    payload.repeatTime !== undefined ||
+    payload.startDate !== undefined ||
+    payload.startTime !== undefined;
   const recurrenceEnabled = parseBoolean(
     payload.recurrenceEnabled,
-    payload.frequency !== undefined || payload.repeatTime !== undefined || payload.startDate !== undefined || payload.startTime !== undefined
+    hasRecurrenceFields
   );
+  // Guard against clients accidentally sending recurrenceEnabled=false while
+  // still sending frequency/schedule fields.
+  const effectiveRecurrenceEnabled = recurrenceEnabled || hasRecurrenceFields;
   const runImmediately = payload.runNow === true || payload.runNow === 'true' || payload.runNow === 1 || payload.runNow === '1';
   let frequency = null;
   let repeatTime = null;
@@ -477,7 +509,7 @@ function buildCreatePayload(payload) {
   let startAt = null;
   let nextRunAt = null;
 
-  if (recurrenceEnabled) {
+  if (effectiveRecurrenceEnabled) {
     frequency = parseFrequency(payload.frequency);
     repeatTime = parseRepeatTime(payload.repeatTime);
     remainingRuns = repeatTime;
@@ -501,7 +533,7 @@ function buildCreatePayload(payload) {
     coverage,
     coverageUnit,
     labels,
-    recurrenceEnabled,
+    recurrenceEnabled: effectiveRecurrenceEnabled,
     frequency,
     repeatTime,
     remainingRuns,
@@ -813,8 +845,7 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
           });
 
           const bestMatch = chooseBestMatch(ranking);
-          const fallbackCandidate = bestMatch ? null : chooseFallbackCandidate(ranking);
-          const selectedCandidate = bestMatch || fallbackCandidate;
+          const selectedCandidate = bestMatch || null;
           resultRows.push({
             scanRunId: run.id,
             keyword,
@@ -834,22 +865,13 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
                 source: 'EXACT_MATCH',
                 candidate: bestMatch
               }
-              : fallbackCandidate
-                ? {
-                  source: 'TOP_CANDIDATE_FALLBACK',
-                  targetPlaceId: scan.gbpProfile?.placeId || null,
-                  targetBusinessName: scan.gbpProfile?.title || null,
-                  targetDomain: scan.client?.website || scan.gbpProfile?.website || null,
-                  candidate: fallbackCandidate,
-                  topCandidates: ranking.topCandidates || []
-                }
-                : {
-                  reason: 'GBP_NOT_FOUND_IN_RESULTS',
-                  targetPlaceId: scan.gbpProfile?.placeId || null,
-                  targetBusinessName: scan.gbpProfile?.title || null,
-                  targetDomain: scan.client?.website || scan.gbpProfile?.website || null,
-                  topCandidates: ranking.topCandidates || []
-                },
+              : {
+                reason: 'GBP_NOT_FOUND_IN_RESULTS',
+                targetPlaceId: scan.gbpProfile?.placeId || null,
+                targetBusinessName: scan.gbpProfile?.title || null,
+                targetDomain: scan.client?.website || scan.gbpProfile?.website || null,
+                topCandidates: ranking.topCandidates || []
+              },
             apiLogId: ranking.logId ? BigInt(ranking.logId) : null
           });
           completedRequests += 1;
@@ -1054,6 +1076,117 @@ async function buildRunKeywordDetails({ db, run }) {
   }
 
   const enrichedResults = await enrichMappedScanResults(db, keywordResults);
+  const apiLogIds = Array.from(new Set(
+    enrichedResults
+      .map((result) => result.apiLogId)
+      .filter(Boolean)
+  ));
+  const apiLogs = apiLogIds.length
+    ? await db.externalApiLog.findMany({
+      where: {
+        id: { in: apiLogIds.map((id) => BigInt(id)) }
+      },
+      select: {
+        id: true,
+        responsePayload: true
+      }
+    })
+    : [];
+  const competitorsByKey = new Map();
+  for (const log of apiLogs) {
+    const candidates = extractCandidatesFromExternalApiLog(log.responsePayload);
+    for (const candidate of candidates) {
+      const businessName = String(candidate.title || '').trim();
+      if (!businessName) {
+        continue;
+      }
+
+      const key =
+        String(candidate.placeId || '').trim() ||
+        String(candidate.domain || '').trim() ||
+        `${businessName.toLowerCase()}::${String(candidate.address || '').toLowerCase()}`;
+      const existing = competitorsByKey.get(key) || {
+        key,
+        businessName,
+        address: candidate.address ?? null,
+        domain: candidate.domain ?? null,
+        primaryCategory: candidate.primaryCategory ?? null,
+        secondaryCategory: candidate.secondaryCategory ?? null,
+        photos: candidate.photos ?? null,
+        rating: candidate.rating ?? null,
+        reviewsCount: candidate.reviewsCount ?? null,
+        bestRank: null,
+        rankTotal: 0,
+        rankCount: 0
+      };
+
+      if (!existing.address && candidate.address) {
+        existing.address = candidate.address;
+      }
+      if (!existing.domain && candidate.domain) {
+        existing.domain = candidate.domain;
+      }
+      if (!existing.primaryCategory && candidate.primaryCategory) {
+        existing.primaryCategory = candidate.primaryCategory;
+      }
+      if (!existing.secondaryCategory && candidate.secondaryCategory) {
+        existing.secondaryCategory = candidate.secondaryCategory;
+      }
+      if (existing.photos === null || existing.photos === undefined) {
+        existing.photos = candidate.photos ?? null;
+      }
+      if (existing.rating === null || existing.rating === undefined) {
+        existing.rating = candidate.rating ?? null;
+      }
+      if (existing.reviewsCount === null || existing.reviewsCount === undefined) {
+        existing.reviewsCount = candidate.reviewsCount ?? null;
+      }
+
+      if (candidate.rankAbsolute !== null && candidate.rankAbsolute !== undefined) {
+        existing.bestRank = existing.bestRank === null
+          ? candidate.rankAbsolute
+          : Math.min(existing.bestRank, candidate.rankAbsolute);
+        existing.rankTotal += candidate.rankAbsolute;
+        existing.rankCount += 1;
+      }
+
+      competitorsByKey.set(key, existing);
+    }
+  }
+  const competitors = Array.from(competitorsByKey.values())
+    .map((entry) => ({
+      key: entry.key,
+      businessName: entry.businessName,
+      address: entry.address,
+      domain: entry.domain,
+      primaryCategory: entry.primaryCategory,
+      secondaryCategory: entry.secondaryCategory,
+      photos:
+        entry.photos === null || entry.photos === undefined
+          ? null
+          : Number(entry.photos),
+      rating:
+        entry.rating === null || entry.rating === undefined
+          ? null
+          : Number(entry.rating),
+      reviewsCount:
+        entry.reviewsCount === null || entry.reviewsCount === undefined
+          ? null
+          : Number(entry.reviewsCount),
+      bestRank: entry.bestRank,
+      averageRank: entry.rankCount
+        ? Number((entry.rankTotal / entry.rankCount).toFixed(2))
+        : null
+    }))
+    .sort((a, b) => {
+      const rankA = a.averageRank ?? Number.MAX_SAFE_INTEGER;
+      const rankB = b.averageRank ?? Number.MAX_SAFE_INTEGER;
+      if (rankA !== rankB) {
+        return rankA - rankB;
+      }
+
+      return a.businessName.localeCompare(b.businessName);
+    });
   const rankedCoordinates = enrichedResults.filter((result) => result.rankAbsolute !== null);
   const totalRank = rankedCoordinates.reduce((sum, result) => sum + result.rankAbsolute, 0);
   const averageRank = rankedCoordinates.length
@@ -1092,6 +1225,7 @@ async function buildRunKeywordDetails({ db, run }) {
     matchedPlaceId: rankedCoordinates[0]?.matchedPlaceId ?? null,
     matchedPhone: rankedCoordinates[0]?.matchedPhone ?? null,
     matchedRating: rankedCoordinates[0]?.matchedRating ?? null,
+    competitors,
     coordinates: enrichedResults.map((result) => ({
       id: result.id,
       coordinateLabel: result.coordinateLabel,
@@ -1538,7 +1672,9 @@ async function listClientLocalRankings({ db, clientId, page = 1, limit = 20 }) {
         latestScan: summary.averageRank ?? null,
         nextSchedule: scan.nextRunAt,
         totalScans: scan._count.runs,
-        frequency: scan.recurrenceEnabled ? String(scan.frequency || '').toLowerCase() : 'one-time',
+        frequency: scan.frequency
+          ? String(scan.frequency || '').toLowerCase()
+          : 'one-time',
         scanStatus: scan.status,
         runStatus: latestRun.status,
         totalCoordinates: summary.totalCoordinates,
@@ -1581,10 +1717,78 @@ async function listClientLocalRankings({ db, clientId, page = 1, limit = 20 }) {
   };
 }
 
+async function getSavedLocalRankingKeywords({ db, clientId, actorUserId }) {
+  const key = buildSavedLocalRankingKeywordsKey({
+    clientId,
+    actorUserId
+  });
+  const record = await db.appSetting.findUnique({
+    where: { key },
+    select: { valueJson: true }
+  });
+  const keywords = parseSavedKeywordsValue(record?.valueJson);
+
+  return {
+    clientId: Number(clientId),
+    keywords,
+    total: keywords.length
+  };
+}
+
+async function saveLocalRankingKeywords({ db, clientId, actorUserId, payload }) {
+  const incomingKeywords = parseStringArray(payload?.keywords, 'keywords');
+  const key = buildSavedLocalRankingKeywordsKey({
+    clientId,
+    actorUserId
+  });
+  const existingRecord = await db.appSetting.findUnique({
+    where: { key },
+    select: { valueJson: true }
+  });
+  const existingKeywords = parseSavedKeywordsValue(existingRecord?.valueJson);
+  const keywords = Array.from(new Set([...existingKeywords, ...incomingKeywords]));
+
+  await db.appSetting.upsert({
+    where: { key },
+    create: {
+      key,
+      valueJson: keywords
+    },
+    update: {
+      valueJson: keywords
+    }
+  });
+
+  return {
+    clientId: Number(clientId),
+    keywords,
+    total: keywords.length
+  };
+}
+
+async function clearSavedLocalRankingKeywords({ db, clientId, actorUserId }) {
+  const key = buildSavedLocalRankingKeywordsKey({
+    clientId,
+    actorUserId
+  });
+
+  await db.appSetting.deleteMany({
+    where: { key }
+  });
+
+  return {
+    clientId: Number(clientId),
+    cleared: true
+  };
+}
+
 module.exports = {
   createScan,
   listScans,
   listClientLocalRankings,
+  getSavedLocalRankingKeywords,
+  saveLocalRankingKeywords,
+  clearSavedLocalRankingKeywords,
   getScanById,
   getClientScanById,
   deleteScanById,

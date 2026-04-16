@@ -532,6 +532,101 @@ async function listPendingInvitations({ db }) {
   };
 }
 
+async function listActivityLogs({
+  db,
+  page = 1,
+  limit = 20,
+  actorUserId
+}) {
+  const activityPage = Number(page);
+  const activityLimit = Number(limit);
+
+  if (!Number.isInteger(activityPage) || activityPage <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'page must be a positive integer.');
+  }
+  if (!Number.isInteger(activityLimit) || activityLimit <= 0 || activityLimit > 100) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'limit must be an integer between 1 and 100.');
+  }
+
+  const where = {};
+  if (actorUserId !== undefined && actorUserId !== null && actorUserId !== '') {
+    const parsedActorId = Number(actorUserId);
+    if (!Number.isInteger(parsedActorId) || parsedActorId <= 0) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'actorUserId must be a positive integer.');
+    }
+    where.actorUserId = BigInt(parsedActorId);
+  }
+
+  const skip = (activityPage - 1) * activityLimit;
+  const [total, logs] = await Promise.all([
+    db.auditLog.count({ where }),
+    db.auditLog.findMany({
+      where,
+      skip,
+      take: activityLimit,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        actor: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true
+          }
+        }
+      }
+    })
+  ]);
+
+  const totalPages = Math.max(1, Math.ceil(total / activityLimit));
+  const hasPrev = activityPage > 1;
+  const hasNext = activityPage < totalPages;
+
+  const activityLogs = logs.map((log) => {
+    const actorName = [log.actor?.firstName, log.actor?.lastName]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    return {
+      id: Number(log.id),
+      actorUserId: log.actorUserId ? Number(log.actorUserId) : null,
+      actor: log.actor
+        ? {
+          id: Number(log.actor.id),
+          email: log.actor.email,
+          firstName: log.actor.firstName ?? null,
+          lastName: log.actor.lastName ?? null,
+          name: actorName || log.actor.email
+        }
+        : null,
+      action: log.action,
+      resourceType: log.resourceType,
+      resourceId: log.resourceId ?? null,
+      requestId: log.requestId ?? null,
+      ipAddress: log.ipAddress ?? null,
+      userAgent: log.userAgent ?? null,
+      metadata: log.metadata ?? null,
+      createdAt: log.createdAt
+    };
+  });
+
+  return {
+    activityLogs,
+    pagination: {
+      page: activityPage,
+      limit: activityLimit,
+      total,
+      totalPages,
+      hasPrev,
+      hasNext,
+      prevPage: hasPrev ? activityPage - 1 : null,
+      nextPage: hasNext ? activityPage + 1 : null
+    }
+  };
+}
+
 async function createUser({ db, actorUserId, payload }) {
   const email = String(payload.email || '').toLowerCase().trim();
   const password = payload.password;
@@ -1120,6 +1215,7 @@ async function updatePermissionsSettings({ db, payload }) {
 
 module.exports = {
   listUsers,
+  listActivityLogs,
   listPendingInvitations,
   createUser,
   updateUser,

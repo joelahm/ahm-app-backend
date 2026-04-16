@@ -1,5 +1,6 @@
 const { AppError } = require('../../lib/errors');
 const usersService = require('./users.service');
+const { writeAuditLog } = require('../../lib/audit-log');
 const fs = require('fs/promises');
 const path = require('path');
 
@@ -49,6 +50,21 @@ async function listUsers(req, res, next) {
   }
 }
 
+async function listActivityLogs(req, res, next) {
+  try {
+    const data = await usersService.listActivityLogs({
+      db: req.app.locals.db,
+      page: req.query.page,
+      limit: req.query.limit,
+      actorUserId: req.query.actorUserId
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listPendingInvitations(req, res, next) {
   try {
     const data = await usersService.listPendingInvitations({
@@ -69,6 +85,20 @@ async function createUser(req, res, next) {
       payload: req.body || {}
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'USER_CREATED',
+      resourceType: 'user',
+      resourceId: user.id,
+      metadata: {
+        email: user.email,
+        role: user.role,
+        status: user.status
+      }
+    });
+
     res.status(201).json({ user });
   } catch (err) {
     next(err);
@@ -83,6 +113,19 @@ async function patchMe(req, res, next) {
       payload: {
         ...(req.body || {}),
         filePath: req.file?.path
+      }
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'PROFILE_UPDATED',
+      resourceType: 'user',
+      resourceId: req.auth.userId,
+      metadata: {
+        updatedFields: Object.keys(req.body || {}),
+        avatarUpdated: Boolean(req.file?.path)
       }
     });
 
@@ -105,6 +148,18 @@ async function patchUser(req, res, next) {
       payload: req.body || {}
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'USER_UPDATED',
+      resourceType: 'user',
+      resourceId: userId,
+      metadata: {
+        updatedFields: Object.keys(req.body || {})
+      }
+    });
+
     res.status(200).json({ success: true });
   } catch (err) {
     next(err);
@@ -121,6 +176,18 @@ async function patchUserRole(req, res, next) {
       role
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'USER_ROLE_UPDATED',
+      resourceType: 'user',
+      resourceId: userId,
+      metadata: {
+        role
+      }
+    });
+
     res.status(200).json(data);
   } catch (err) {
     next(err);
@@ -135,6 +202,15 @@ async function patchPassword(req, res, next) {
       db: req.app.locals.db,
       userId,
       newPassword
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'USER_PASSWORD_UPDATED',
+      resourceType: 'user',
+      resourceId: userId
     });
 
     res.status(200).json({ success: true });
@@ -154,6 +230,15 @@ async function patchMyPassword(req, res, next) {
       confirmPassword
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'PROFILE_PASSWORD_UPDATED',
+      resourceType: 'user',
+      resourceId: req.auth.userId
+    });
+
     res.status(200).json({ success: true });
   } catch (err) {
     next(err);
@@ -167,6 +252,15 @@ async function patchAvatar(req, res, next) {
       db: req.app.locals.db,
       userId,
       filePath: req.file?.path
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'USER_AVATAR_UPDATED',
+      resourceType: 'user',
+      resourceId: userId
     });
 
     res.status(200).json({ user });
@@ -187,6 +281,15 @@ async function deleteUser(req, res, next) {
       userId
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'USER_DELETED',
+      resourceType: 'user',
+      resourceId: userId
+    });
+
     res.status(200).json(data);
   } catch (err) {
     next(err);
@@ -200,6 +303,18 @@ async function inviteUsers(req, res, next) {
       env: req.app.locals.env,
       actorUserId: req.auth.userId,
       payload: req.body || {}
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'USERS_INVITED',
+      resourceType: 'user_invitation',
+      metadata: {
+        summary: data.summary,
+        totalResults: Array.isArray(data.results) ? data.results.length : 0
+      }
     });
 
     res.status(200).json(data);
@@ -227,6 +342,15 @@ async function patchPermissionsSettings(req, res, next) {
       payload: req.body || {}
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'PERMISSIONS_UPDATED',
+      resourceType: 'settings',
+      resourceId: 'workspace_permissions'
+    });
+
     res.status(200).json(data);
   } catch (err) {
     next(err);
@@ -235,6 +359,7 @@ async function patchPermissionsSettings(req, res, next) {
 
 module.exports = {
   listUsers,
+  listActivityLogs,
   listPendingInvitations,
   createUser,
   patchMe,

@@ -1,5 +1,6 @@
 const clientsService = require('./clients.service');
 const { AppError } = require('../../lib/errors');
+const { writeAuditLog } = require('../../lib/audit-log');
 const fs = require('fs/promises');
 const path = require('path');
 
@@ -95,6 +96,18 @@ async function createClient(req, res, next) {
       payload: req.body || {}
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'CLIENT_CREATED',
+      resourceType: 'client',
+      resourceId: client.id,
+      metadata: {
+        businessName: client.businessName
+      }
+    });
+
     res.status(201).json({ client });
   } catch (err) {
     next(err);
@@ -109,6 +122,18 @@ async function patchClient(req, res, next) {
       clientId,
       payload: req.body || {},
       files: req.files || []
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'CLIENT_UPDATED',
+      resourceType: 'client',
+      resourceId: clientId,
+      metadata: {
+        updatedFields: Object.keys(req.body || {})
+      }
     });
 
     res.status(200).json({ client });
@@ -134,6 +159,19 @@ async function createClientProject(req, res, next) {
       payload: req.body || {}
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'PROJECT_CREATED',
+      resourceType: 'client_project',
+      resourceId: project.id,
+      metadata: {
+        clientId,
+        project: project.project
+      }
+    });
+
     res.status(201).json({ project });
   } catch (err) {
     next(err);
@@ -148,6 +186,16 @@ async function deleteClientProject(req, res, next) {
       db: req.app.locals.db,
       clientId,
       projectId
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'PROJECT_DELETED',
+      resourceType: 'client_project',
+      resourceId: projectId,
+      metadata: { clientId }
     });
 
     res.status(200).json({ project: deletedProject });
@@ -165,6 +213,19 @@ async function patchClientProject(req, res, next) {
       clientId,
       projectId,
       payload: req.body || {}
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'PROJECT_UPDATED',
+      resourceType: 'client_project',
+      resourceId: projectId,
+      metadata: {
+        clientId,
+        updatedFields: Object.keys(req.body || {})
+      }
     });
 
     res.status(200).json({ project });

@@ -1,5 +1,6 @@
 const { AppError } = require('../../lib/errors');
 const projectsService = require('./projects.service');
+const { writeAuditLog } = require('../../lib/audit-log');
 
 function readProjectId(req) {
   const id = Number(req.params.id);
@@ -51,6 +52,19 @@ async function createProjectTask(req, res, next) {
       payload: req.body || {}
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'TASK_CREATED',
+      resourceType: 'project_task',
+      resourceId: task.id,
+      metadata: {
+        projectId,
+        task: task.task
+      }
+    });
+
     res.status(201).json({ task });
   } catch (err) {
     next(err);
@@ -67,6 +81,19 @@ async function createProjectTaskFromBody(req, res, next) {
       payload: req.body || {}
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'TASK_CREATED',
+      resourceType: 'project_task',
+      resourceId: task.id,
+      metadata: {
+        projectId,
+        task: task.task
+      }
+    });
+
     res.status(201).json({ task });
   } catch (err) {
     next(err);
@@ -80,6 +107,18 @@ async function updateProjectTask(req, res, next) {
       db: req.app.locals.db,
       taskId,
       payload: req.body || {}
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'TASK_UPDATED',
+      resourceType: 'project_task',
+      resourceId: taskId,
+      metadata: {
+        updatedFields: Object.keys(req.body || {})
+      }
     });
 
     res.status(200).json({ task });
@@ -109,6 +148,15 @@ async function deleteProjectTask(req, res, next) {
       taskId
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'TASK_DELETED',
+      resourceType: 'project_task',
+      resourceId: taskId
+    });
+
     res.status(200).json(data);
   } catch (err) {
     next(err);
@@ -123,6 +171,18 @@ async function createTaskComment(req, res, next) {
       actorUserId: req.auth.userId,
       taskId,
       payload: req.body || {}
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'TASK_COMMENT_CREATED',
+      resourceType: 'task_comment',
+      resourceId: comment.id,
+      metadata: {
+        taskId
+      }
     });
 
     res.status(201).json({ comment });
@@ -157,6 +217,15 @@ async function deleteTaskComment(req, res, next) {
       commentId
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'TASK_COMMENT_DELETED',
+      resourceType: 'task_comment',
+      resourceId: commentId
+    });
+
     res.status(200).json(data);
   } catch (err) {
     next(err);
@@ -171,6 +240,18 @@ async function createProjectComment(req, res, next) {
       actorUserId: req.auth.userId,
       projectId,
       payload: req.body || {}
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'PROJECT_COMMENT_CREATED',
+      resourceType: 'project_comment',
+      resourceId: comment.id,
+      metadata: {
+        projectId
+      }
     });
 
     res.status(201).json({ comment });
@@ -203,6 +284,15 @@ async function deleteProjectComment(req, res, next) {
       db: req.app.locals.db,
       actorUserId: req.auth.userId,
       commentId
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'PROJECT_COMMENT_DELETED',
+      resourceType: 'project_comment',
+      resourceId: commentId
     });
 
     res.status(200).json(data);

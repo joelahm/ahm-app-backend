@@ -1,4 +1,5 @@
 const generatedSchemasService = require('./generated-schemas.service');
+const { writeAuditLog } = require('../../lib/audit-log');
 
 async function listGeneratedSchemas(req, res, next) {
   try {
@@ -33,6 +34,19 @@ async function createGeneratedSchema(req, res, next) {
       payload: req.body || {}
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'SCHEMA_GENERATED',
+      resourceType: 'generated_schema',
+      resourceId: data?.generatedSchema?.id ?? null,
+      metadata: {
+        schemaType: data?.generatedSchema?.schemaType ?? null,
+        clientId: data?.generatedSchema?.clientId ?? null
+      }
+    });
+
     res.status(201).json(data);
   } catch (err) {
     next(err);
@@ -47,6 +61,18 @@ async function updateGeneratedSchema(req, res, next) {
       payload: req.body || {}
     });
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'SCHEMA_UPDATED',
+      resourceType: 'generated_schema',
+      resourceId: String(req.params.id || ''),
+      metadata: {
+        updatedFields: Object.keys(req.body || {})
+      }
+    });
+
     res.status(200).json(data);
   } catch (err) {
     next(err);
@@ -56,9 +82,19 @@ async function updateGeneratedSchema(req, res, next) {
 
 async function deleteGeneratedSchema(req, res, next) {
   try {
+    const schemaId = String(req.params.id || '');
     const data = await generatedSchemasService.deleteGeneratedSchema({
       db: req.app.locals.db,
-      schemaId: String(req.params.id || '')
+      schemaId
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'SCHEMA_DELETED',
+      resourceType: 'generated_schema',
+      resourceId: schemaId
     });
 
     res.status(200).json(data);

@@ -16,6 +16,7 @@ router.patch('/me/password', usersController.patchMyPassword);
 router.get('/permissions', requireRole('ADMIN'), usersController.getPermissionsSettings);
 router.patch('/permissions', requireRole('ADMIN'), usersController.patchPermissionsSettings);
 router.get('/', requireRole('ADMIN'), usersController.listUsers);
+router.get('/activity-logs', requireRole('ADMIN'), usersController.listActivityLogs);
 router.get('/pending-invitations', requireRole('ADMIN'), usersController.listPendingInvitations);
 router.post('/', requirePermission('add-new-user'), usersController.createUser);
 router.post('/invite', requirePermission('add-new-user'), usersController.inviteUsers);

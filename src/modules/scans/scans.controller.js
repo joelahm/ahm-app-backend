@@ -1,5 +1,6 @@
 const scansService = require('./scans.service');
 const { AppError } = require('../../lib/errors');
+const { writeAuditLog } = require('../../lib/audit-log');
 
 function readScanId(req) {
   const id = Number(req.params.id);
@@ -63,6 +64,19 @@ async function createScan(req, res, next) {
       }
     }
 
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: runNow ? 'LOCAL_RANK_SCAN_CREATED_AND_STARTED' : 'LOCAL_RANK_SCAN_CREATED',
+      resourceType: 'scan',
+      resourceId: scans[0]?.id ?? null,
+      metadata: {
+        totalScans: scans.length,
+        runNow
+      }
+    });
+
     res.status(201).json({
       scan: scans[0] || null,
       scans,
@@ -96,6 +110,46 @@ async function listClientLocalRankings(req, res, next) {
       clientId: readClientId(req),
       page: req.query.page,
       limit: req.query.limit
+    });
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getSavedLocalRankingKeywords(req, res, next) {
+  try {
+    const data = await scansService.getSavedLocalRankingKeywords({
+      db: req.app.locals.db,
+      clientId: readClientId(req),
+      actorUserId: req.auth.userId
+    });
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function saveLocalRankingKeywords(req, res, next) {
+  try {
+    const data = await scansService.saveLocalRankingKeywords({
+      db: req.app.locals.db,
+      clientId: readClientId(req),
+      actorUserId: req.auth.userId,
+      payload: req.body || {}
+    });
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function clearSavedLocalRankingKeywords(req, res, next) {
+  try {
+    const data = await scansService.clearSavedLocalRankingKeywords({
+      db: req.app.locals.db,
+      clientId: readClientId(req),
+      actorUserId: req.auth.userId
     });
     res.status(200).json(data);
   } catch (err) {
@@ -174,6 +228,18 @@ async function runScan(req, res, next) {
       db: req.app.locals.db,
       actorUserId: req.auth.userId,
       scanId
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'LOCAL_RANK_SCAN_STARTED',
+      resourceType: 'scan_run',
+      resourceId: run.id,
+      metadata: {
+        scanId
+      }
     });
 
     res.status(202).json({
@@ -258,6 +324,9 @@ module.exports = {
   createScan,
   listScans,
   listClientLocalRankings,
+  getSavedLocalRankingKeywords,
+  saveLocalRankingKeywords,
+  clearSavedLocalRankingKeywords,
   getScanById,
   getClientScanById,
   getClientScanComparison,
