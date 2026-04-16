@@ -191,6 +191,36 @@ function extractDataForSeoTaskId(responsePayload) {
   return tasks[0]?.id || null;
 }
 
+function extractDataForSeoErrorSummary(responsePayload) {
+  const tasks = Array.isArray(responsePayload?.tasks) ? responsePayload.tasks : [];
+
+  for (const task of tasks) {
+    const statusCode = task?.status_code;
+    const statusMessage = String(task?.status_message || '').trim();
+    const customMessage = String(task?.custom_error || '').trim();
+
+    if (statusMessage || customMessage || statusCode) {
+      return {
+        statusCode: statusCode ?? null,
+        statusMessage: statusMessage || null,
+        customMessage: customMessage || null
+      };
+    }
+  }
+
+  const rootStatusCode = responsePayload?.status_code;
+  const rootStatusMessage = String(responsePayload?.status_message || '').trim();
+  if (rootStatusCode || rootStatusMessage) {
+    return {
+      statusCode: rootStatusCode ?? null,
+      statusMessage: rootStatusMessage || null,
+      customMessage: null
+    };
+  }
+
+  return null;
+}
+
 function normalizeDataForSeoItems(payload) {
   const tasks = payload?.tasks;
   if (!Array.isArray(tasks) || !tasks.length) return [];
@@ -1091,10 +1121,11 @@ async function fetchDataForSeoSimilarKeywords({ db, env, requestedBy, payload })
   await assertContextExists(db, clientId);
   const forceRefresh = parseBooleanLike(payload.forceRefresh);
 
+  const includeSerpInfo = parseBooleanLike(payload.includeSerpInfo);
   const task = {
     keyword: requireString(payload.keyword, 'keyword'),
     language_code: optionalString(payload.languageCode) || 'en',
-    include_serp_info: true,
+    include_serp_info: includeSerpInfo,
     limit: Number(payload.limit || 100)
   };
   Object.assign(
@@ -1154,11 +1185,16 @@ async function fetchDataForSeoSimilarKeywords({ db, env, requestedBy, payload })
   });
 
   if (!success) {
+    const upstreamError = extractDataForSeoErrorSummary(responsePayload);
+    const upstreamMessage = upstreamError?.customMessage || upstreamError?.statusMessage || null;
+
     throw new AppError(502, 'UPSTREAM_API_ERROR', 'DataForSEO related keywords request failed.', {
       provider: 'DATAFORSEO',
       operation: 'RELATED_KEYWORDS',
       logId: Number(log.id),
-      upstreamStatus: response.status
+      upstreamStatus: response.status,
+      upstreamMessage,
+      upstreamError
     });
   }
 
