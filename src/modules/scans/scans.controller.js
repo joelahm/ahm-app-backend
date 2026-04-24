@@ -94,8 +94,24 @@ async function listScans(req, res, next) {
     const data = await scansService.listScans({
       db: req.app.locals.db,
       clientId: req.query.clientId,
+      scope: req.query.scope,
+      view: req.query.view,
       page: req.query.page,
       limit: req.query.limit
+    });
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getQuickGbpPreview(req, res, next) {
+  try {
+    const data = await scansService.getQuickGbpPreview({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      actorUserId: req.auth.userId,
+      payload: req.body || {}
     });
     res.status(200).json(data);
   } catch (err) {
@@ -321,6 +337,7 @@ async function getScanRunKeywordDetails(req, res, next) {
 }
 
 module.exports = {
+  getQuickGbpPreview,
   createScan,
   listScans,
   listClientLocalRankings,

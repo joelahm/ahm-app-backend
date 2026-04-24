@@ -8,6 +8,7 @@ const router = express.Router();
 router.use(authenticateAccessToken);
 router.use(requireRole('ADMIN'));
 
+router.get('/list', projectsController.listProjects);
 router.get('/tasks', projectsController.listTasksGroupedByProject);
 router.post('/tasks', projectsController.createProjectTaskFromBody);
 router.patch('/tasks/:taskId', projectsController.updateProjectTask);

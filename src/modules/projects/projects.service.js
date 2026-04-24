@@ -1,6 +1,13 @@
 const { AppError } = require('../../lib/errors');
-const DEFAULT_TASK_STATUSES = ['To Do', 'In Progress', 'On Hold', 'Completed'];
-const PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY = 'project_template_status_options';
+const DEFAULT_TASK_STATUSES = [
+  'To Do',
+  'In Progress',
+  'Internal Review',
+  'Client Review',
+  'On Hold',
+  'Completed'
+];
+const PROJECT_TASK_STATUS_OPTIONS_SETTINGS_KEY = 'project_task_status_options';
 
 function normalizeTaskStatusLabel(value) {
   const normalized = String(value || '').trim().toLowerCase();
@@ -11,6 +18,14 @@ function normalizeTaskStatusLabel(value) {
 
   if (normalized === 'in progress') {
     return 'In Progress';
+  }
+
+  if (normalized === 'internal review') {
+    return 'Internal Review';
+  }
+
+  if (normalized === 'client review') {
+    return 'Client Review';
   }
 
   if (normalized === 'on hold') {
@@ -24,7 +39,56 @@ function normalizeTaskStatusLabel(value) {
   return null;
 }
 
+function normalizeTaskStatusOptionsValue(value) {
+  const source = typeof value === 'object' && value !== null ? value : {};
+  const rawOptions = Array.isArray(source.statusOptions)
+    ? source.statusOptions
+    : Array.isArray(source.options)
+      ? source.options
+      : [];
+
+  const normalized = rawOptions
+    .map((item) => {
+      if (typeof item === 'string') {
+        return normalizeTaskStatusLabel(item);
+      }
+
+      const itemSource = typeof item === 'object' && item !== null ? item : {};
+      return normalizeTaskStatusLabel(
+        itemSource.label || itemSource.value || itemSource.name || ''
+      );
+    })
+    .filter(Boolean);
+
+  const unique = Array.from(new Set(normalized));
+  const ordered = DEFAULT_TASK_STATUSES.filter((status) => unique.includes(status));
+
+  return ordered.length ? ordered : DEFAULT_TASK_STATUSES;
+}
+
+async function persistTaskStatusOptions({ db, statusOptions }) {
+  await db.appSetting.upsert({
+    where: { key: PROJECT_TASK_STATUS_OPTIONS_SETTINGS_KEY },
+    create: {
+      key: PROJECT_TASK_STATUS_OPTIONS_SETTINGS_KEY,
+      valueJson: { statusOptions }
+    },
+    update: {
+      valueJson: { statusOptions }
+    }
+  });
+}
+
 function parseOptionalUserId(value, fieldName) {
+  if (value === undefined || value === null || value === '') return null;
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', `${fieldName} must be a positive integer.`);
+  }
+  return BigInt(id);
+}
+
+function parseOptionalTaskId(value, fieldName) {
   if (value === undefined || value === null || value === '') return null;
   const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) {
@@ -44,21 +108,16 @@ function parseOptionalDate(value, fieldName) {
 
 async function getAllowedTaskStatuses(db) {
   const setting = await db.appSetting.findUnique({
-    where: { key: PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY },
+    where: { key: PROJECT_TASK_STATUS_OPTIONS_SETTINGS_KEY },
     select: { valueJson: true }
   });
+  const allowedTaskStatuses = normalizeTaskStatusOptionsValue(setting?.valueJson);
 
-  const rawOptions = Array.isArray(setting?.valueJson?.statusOptions)
-    ? setting.valueJson.statusOptions
-    : [];
-  const normalized = rawOptions
-    .map((item) => normalizeTaskStatusLabel(item))
-    .filter(Boolean);
+  if (!setting) {
+    await persistTaskStatusOptions({ db, statusOptions: allowedTaskStatuses });
+  }
 
-  const unique = Array.from(new Set(normalized));
-  const ordered = DEFAULT_TASK_STATUSES.filter((status) => unique.includes(status));
-
-  return ordered.length ? ordered : DEFAULT_TASK_STATUSES;
+  return allowedTaskStatuses;
 }
 
 async function parseTaskStatus(db, value) {
@@ -111,6 +170,7 @@ function mapTask(task) {
   return {
     id: Number(task.id),
     projectId: Number(task.projectId),
+    parentTaskId: task.parentTaskId ? Number(task.parentTaskId) : null,
     task: task.task,
     taskName: task.task,
     projectType: task.projectType ?? null,
@@ -183,6 +243,7 @@ async function createTask({ db, actorUserId, projectId, payload }) {
       ? 'assigneeId'
       : (payload.assignedTo !== undefined ? 'assignedTo' : 'assignedToId')
   );
+  const parentTaskId = parseOptionalTaskId(payload.parentTaskId, 'parentTaskId');
 
   if (!taskName) {
     throw new AppError(400, 'VALIDATION_ERROR', 'task is required.');
@@ -194,6 +255,25 @@ async function createTask({ db, actorUserId, projectId, payload }) {
   });
   if (!projectExists) {
     throw new AppError(404, 'NOT_FOUND', 'Project not found.');
+  }
+
+  if (parentTaskId) {
+    const parentTask = await db.projectTask.findUnique({
+      where: { id: parentTaskId },
+      select: { id: true, projectId: true }
+    });
+
+    if (!parentTask) {
+      throw new AppError(404, 'NOT_FOUND', 'Parent task not found.');
+    }
+
+    if (Number(parentTask.projectId) !== Number(projectId)) {
+      throw new AppError(
+        400,
+        'VALIDATION_ERROR',
+        'parentTaskId must reference a task in the same project.'
+      );
+    }
   }
 
   let created;
@@ -208,6 +288,7 @@ async function createTask({ db, actorUserId, projectId, payload }) {
         priority,
         startDate,
         dueDate,
+        ...(parentTaskId ? { parentTaskId } : {}),
         assignedTo,
         createdBy: BigInt(actorUserId)
       },
@@ -277,6 +358,9 @@ async function updateTask({ db, taskId, payload }) {
         ? 'assigneeId'
         : (payload.assignedTo !== undefined ? 'assignedTo' : 'assignedToId')
     );
+  const parentTaskId = payload.parentTaskId === undefined
+    ? undefined
+    : parseOptionalTaskId(payload.parentTaskId, 'parentTaskId');
   const nextProjectId = payload.projectId === undefined
     ? undefined
     : Number(payload.projectId);
@@ -311,6 +395,32 @@ async function updateTask({ db, taskId, payload }) {
     }
   }
 
+  if (parentTaskId !== undefined && parentTaskId !== null) {
+    const targetProjectId = nextProjectId === undefined
+      ? Number(existingTask.projectId)
+      : nextProjectId;
+    const parentTask = await db.projectTask.findUnique({
+      where: { id: parentTaskId },
+      select: { id: true, projectId: true }
+    });
+
+    if (!parentTask) {
+      throw new AppError(404, 'NOT_FOUND', 'Parent task not found.');
+    }
+
+    if (Number(parentTask.projectId) !== targetProjectId) {
+      throw new AppError(
+        400,
+        'VALIDATION_ERROR',
+        'parentTaskId must reference a task in the same project.'
+      );
+    }
+
+    if (Number(parentTask.id) === Number(taskId)) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Task cannot be parent of itself.');
+    }
+  }
+
   const patch = {
     task: taskName,
     projectId: nextProjectId === undefined ? undefined : BigInt(nextProjectId),
@@ -320,6 +430,7 @@ async function updateTask({ db, taskId, payload }) {
     priority,
     startDate,
     dueDate,
+    parentTaskId,
     assignedTo
   };
 
@@ -599,7 +710,298 @@ async function deleteProjectComment({ db, actorUserId, commentId }) {
   return { success: true };
 }
 
+const PROJECT_LIST_GROUP_BY_KEYS = ['projects', 'client', 'status', 'phase', 'progress'];
+
+function normalizeGroupBy(value) {
+  const normalized = String(value || 'projects').trim().toLowerCase();
+  if (!PROJECT_LIST_GROUP_BY_KEYS.includes(normalized)) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      `groupBy must be one of: ${PROJECT_LIST_GROUP_BY_KEYS.join(', ')}.`
+    );
+  }
+  return normalized;
+}
+
+function normalizeClientStatusLabel(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) {
+    return 'Active';
+  }
+
+  return normalized
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function formatDisplayDate(value) {
+  if (!value) {
+    return '-';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return '-';
+  }
+
+  return parsed.toLocaleDateString('en-US', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function calculateProjectProgressPercent(tasks) {
+  if (!tasks.length) {
+    return 0;
+  }
+
+  const completedCount = tasks.filter((task) => {
+    const normalizedStatus = String(task.status || '').trim().toUpperCase();
+    return normalizedStatus === 'DONE' || normalizedStatus === 'COMPLETED';
+  }).length;
+
+  return Math.round((completedCount / tasks.length) * 100);
+}
+
+function computeProjectOverdueCount(tasks) {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  return tasks.filter((task) => {
+    if (!task.dueDate) {
+      return false;
+    }
+
+    const dueDate = new Date(task.dueDate);
+    if (Number.isNaN(dueDate.getTime())) {
+      return false;
+    }
+
+    const normalizedStatus = String(task.status || '').trim().toUpperCase();
+    const isCompleted = normalizedStatus === 'DONE' || normalizedStatus === 'COMPLETED';
+
+    return !isCompleted && dueDate.getTime() < startOfToday.getTime();
+  }).length;
+}
+
+function computeProjectStartDateLabel(tasks) {
+  const sorted = tasks
+    .filter((task) => Boolean(task.startDate))
+    .map((task) => new Date(task.startDate))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((left, right) => left.getTime() - right.getTime());
+
+  if (!sorted.length) {
+    return '-';
+  }
+
+  return formatDisplayDate(sorted[0]);
+}
+
+function computeProjectDueDateLabel(tasks) {
+  const sorted = tasks
+    .filter((task) => Boolean(task.dueDate))
+    .map((task) => new Date(task.dueDate))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((left, right) => right.getTime() - left.getTime());
+
+  if (!sorted.length) {
+    return '-';
+  }
+
+  return formatDisplayDate(sorted[0]);
+}
+
+function getGroupLabel(item, groupBy) {
+  if (groupBy === 'projects') {
+    return item.project || 'Unspecified';
+  }
+  if (groupBy === 'client') {
+    return item.clientName || 'Unspecified';
+  }
+  if (groupBy === 'status') {
+    return item.status || 'Unspecified';
+  }
+  if (groupBy === 'phase') {
+    return item.phase || 'Unspecified';
+  }
+
+  return item.progress || 'Unspecified';
+}
+
+async function listProjects({ db, query }) {
+  const groupBy = normalizeGroupBy(query?.groupBy);
+  const page = Number(query?.page || 1);
+  const limit = Number(query?.limit || 50);
+  const search = String(query?.search || '').trim().toLowerCase();
+  const clientId = query?.clientId;
+
+  if (!Number.isInteger(page) || page <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'page must be a positive integer.');
+  }
+
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 200) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'limit must be between 1 and 200.');
+  }
+
+  let parsedClientId = null;
+  if (clientId !== undefined && clientId !== null && clientId !== '') {
+    parsedClientId = Number(clientId);
+    if (!Number.isInteger(parsedClientId) || parsedClientId <= 0) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'clientId must be a positive integer.');
+    }
+  }
+
+  const projects = await db.clientProject.findMany({
+    where: parsedClientId
+      ? {
+        clientId: BigInt(parsedClientId)
+      }
+      : undefined,
+    include: {
+      client: {
+        select: {
+          id: true,
+          clientName: true,
+          businessName: true,
+          addressLine1: true,
+          addressLine2: true,
+          cityState: true,
+          postCode: true,
+          status: true
+        }
+      },
+      clientSuccessManager: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          avatarUrl: true
+        }
+      },
+      tasks: {
+        select: {
+          id: true,
+          status: true,
+          startDate: true,
+          dueDate: true
+        }
+      }
+    },
+    orderBy: [
+      { clientId: 'asc' },
+      { id: 'asc' }
+    ]
+  });
+
+  const rows = projects
+    .map((project) => {
+      const clientName =
+        project.client?.clientName ||
+        project.client?.businessName ||
+        `Client ${Number(project.clientId)}`;
+      const clientAddress = [
+        project.client?.addressLine1,
+        project.client?.addressLine2,
+        project.client?.cityState,
+        project.client?.postCode
+      ]
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+        .join(', ');
+      const csmName =
+        [project.clientSuccessManager?.firstName, project.clientSuccessManager?.lastName]
+          .map((value) => String(value || '').trim())
+          .filter(Boolean)
+          .join(' ') || '-';
+
+      return {
+        id: Number(project.id),
+        clientId: Number(project.clientId),
+        clientName,
+        clientAddress: clientAddress || '-',
+        project: String(project.project || '-').trim() || '-',
+        progressPercent: calculateProjectProgressPercent(project.tasks || []),
+        startDateLabel: computeProjectStartDateLabel(project.tasks || []),
+        dueDateLabel: computeProjectDueDateLabel(project.tasks || []),
+        overdueCount: computeProjectOverdueCount(project.tasks || []),
+        csm: {
+          id: project.clientSuccessManager?.id
+            ? Number(project.clientSuccessManager.id)
+            : null,
+          name: csmName,
+          avatar: project.clientSuccessManager?.avatarUrl || null
+        },
+        status: normalizeClientStatusLabel(project.client?.status),
+        phase: String(project.phase || '-').trim() || '-',
+        progress: String(project.progress || '-').trim() || '-'
+      };
+    })
+    .filter((item) => {
+      if (!search) {
+        return true;
+      }
+
+      const haystack = [
+        item.clientName,
+        item.project,
+        item.status,
+        item.phase,
+        item.progress,
+        item.csm.name
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(search);
+    });
+
+  const total = rows.length;
+  const start = (page - 1) * limit;
+  const end = start + limit;
+  const pagedRows = rows.slice(start, end);
+
+  const grouped = new Map();
+  for (const row of pagedRows) {
+    const label = getGroupLabel(row, groupBy);
+    const current = grouped.get(label) || [];
+    current.push(row);
+    grouped.set(label, current);
+  }
+
+  const groups = Array.from(grouped.entries())
+    .map(([label, items]) => ({
+      key: label,
+      label,
+      count: items.length,
+      items: items.sort((left, right) => {
+        if (left.clientName !== right.clientName) {
+          return left.clientName.localeCompare(right.clientName);
+        }
+
+        return left.project.localeCompare(right.project);
+      })
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label));
+
+  return {
+    groupBy,
+    groups,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: total > 0 ? Math.ceil(total / limit) : 1
+    }
+  };
+}
+
 module.exports = {
+  listProjects,
   createTask,
   updateTask,
   listTasksGroupedByProject,

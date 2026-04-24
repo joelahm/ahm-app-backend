@@ -22,6 +22,22 @@ function toErrorResponse(err) {
     };
   }
 
+  if (err?.type === 'entity.too.large') {
+    return {
+      statusCode: 413,
+      body: {
+        error: {
+          code: 'PAYLOAD_TOO_LARGE',
+          message: 'Request payload is too large.',
+          details: {
+            limit: err.limit ?? null,
+            length: err.length ?? null
+          }
+        }
+      }
+    };
+  }
+
   return {
     statusCode: 500,
     body: {

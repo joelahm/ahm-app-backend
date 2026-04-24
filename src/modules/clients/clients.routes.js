@@ -19,6 +19,17 @@ const CLIENT_READ_PERMISSIONS = [
 router.get('/', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.listClients);
 router.get('/:id', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.getClientById);
 router.get('/:id/gbp-details', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.getClientGbpDetails);
+router.get('/:id/reviews', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.getClientGbpReviews);
+router.put('/:id/reviews/:reviewId/draft', requirePermission('reply-to-reviews'), clientsController.saveClientReviewReplyDraft);
+router.get('/:id/gbp-postings', requirePermission('view-posts'), clientsController.listClientGbpPostings);
+router.post('/:id/gbp-postings', requirePermission('create-draft-posts'), clientsController.createClientGbpPostings);
+router.post('/:id/gbp-postings/generate-from-keywords', requirePermission('create-draft-posts'), clientsController.generateClientGbpPostings);
+router.post('/:id/gbp-postings/:postingId/generate-content', requirePermission('create-draft-posts'), clientsController.generateClientGbpPostingContent);
+router.patch('/:id/gbp-postings/:postingId', requirePermission('create-draft-posts'), clientsController.patchClientGbpPosting);
+router.delete('/:id/gbp-postings/:postingId', requirePermission('create-draft-posts'), clientsController.deleteClientGbpPosting);
+router.get('/:id/gbp-postings/:postingId/comments', requirePermission('view-posts'), clientsController.listClientGbpPostingComments);
+router.post('/:id/gbp-postings/:postingId/comments', requirePermission('create-draft-posts'), clientsController.createClientGbpPostingComment);
+router.delete('/:id/gbp-postings/:postingId/comments/:commentId', requirePermission('create-draft-posts'), clientsController.deleteClientGbpPostingComment);
 router.get('/:id/citations', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.listClientCitations);
 router.get('/:id/projects', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.listClientProjects);
 router.post('/', requirePermission('add-new-client'), clientsController.createClient);

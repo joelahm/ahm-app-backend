@@ -127,6 +127,19 @@ async function updateProjectTask(req, res, next) {
   }
 }
 
+async function listProjects(req, res, next) {
+  try {
+    const data = await projectsService.listProjects({
+      db: req.app.locals.db,
+      query: req.query || {}
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listTasksGroupedByProject(req, res, next) {
   try {
     const data = await projectsService.listTasksGroupedByProject({
@@ -302,6 +315,7 @@ async function deleteProjectComment(req, res, next) {
 }
 
 module.exports = {
+  listProjects,
   listTasksGroupedByProject,
   createProjectTask,
   createProjectTaskFromBody,

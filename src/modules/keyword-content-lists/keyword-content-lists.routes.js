@@ -10,5 +10,9 @@ router.use(requireRole('ADMIN'));
 
 router.get('/', keywordContentListsController.listKeywordContentLists);
 router.post('/', keywordContentListsController.createKeywordContentList);
+router.patch('/keywords', keywordContentListsController.updateKeywordContentListKeyword);
+router.delete('/keywords', keywordContentListsController.deleteKeywordContentListKeyword);
+router.get('/breakdown', keywordContentListsController.getClientContentBreakdown);
+router.put('/breakdown', keywordContentListsController.saveClientContentBreakdown);
 
 module.exports = { keywordContentListsRouter: router };

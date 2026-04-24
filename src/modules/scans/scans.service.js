@@ -1,8 +1,12 @@
 const { AppError } = require('../../lib/errors');
-const { fetchDataForSeoRankings } = require('../integrations/integrations.service');
+const {
+  fetchDataForSeoRankings,
+  fetchSerpApiGbpDetails
+} = require('../integrations/integrations.service');
 
 const ALLOWED_FREQUENCIES = new Set(['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY']);
-const ALLOWED_SCAN_STATUSES = new Set(['ACTIVE', 'PAUSED']);
+const ALLOWED_SCAN_STATUSES = new Set(['ACTIVE', 'PAUSED', 'DELETED']);
+const ALLOWED_SCAN_SCOPES = new Set(['CLIENT', 'QUICK']);
 const LOCAL_RANKINGS_SAVED_KEYWORDS_PREFIX = 'local_rankings_saved_keywords';
 
 function parsePositiveInteger(value, fieldName) {
@@ -222,16 +226,73 @@ function parseStatus(value) {
   if (value === undefined) return 'ACTIVE';
   const normalized = String(value || '').trim().toUpperCase();
   if (!ALLOWED_SCAN_STATUSES.has(normalized)) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'status must be ACTIVE or PAUSED.');
+    throw new AppError(400, 'VALIDATION_ERROR', 'status must be ACTIVE, PAUSED, or DELETED.');
   }
   return normalized;
+}
+
+function parseScanScope(value) {
+  if (value === undefined || value === null || value === '') {
+    return 'CLIENT';
+  }
+
+  const normalized = String(value).trim().toUpperCase();
+  if (!ALLOWED_SCAN_SCOPES.has(normalized)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'scanScope must be CLIENT or QUICK.');
+  }
+
+  return normalized;
+}
+
+function parseQuickScanContext(rawValue) {
+  if (!rawValue || typeof rawValue !== 'object') {
+    throw new AppError(400, 'VALIDATION_ERROR', 'quickScanContext is required for QUICK scans.');
+  }
+
+  const placeId = String(rawValue.placeId || '').trim() || null;
+  const dataCid = String(rawValue.dataCid || '').trim() || null;
+  const businessName = String(rawValue.businessName || rawValue.title || '').trim() || null;
+  const address = String(rawValue.address || '').trim() || null;
+  const website = String(rawValue.website || '').trim() || null;
+  const latitude = rawValue.latitude === undefined || rawValue.latitude === null
+    ? null
+    : Number(rawValue.latitude);
+  const longitude = rawValue.longitude === undefined || rawValue.longitude === null
+    ? null
+    : Number(rawValue.longitude);
+
+  if (!placeId && !dataCid) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'quickScanContext.placeId or quickScanContext.dataCid is required.');
+  }
+
+  if (latitude !== null && (!Number.isFinite(latitude) || latitude < -90 || latitude > 90)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'quickScanContext.latitude must be between -90 and 90.');
+  }
+
+  if (longitude !== null && (!Number.isFinite(longitude) || longitude < -180 || longitude > 180)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'quickScanContext.longitude must be between -180 and 180.');
+  }
+
+  return {
+    placeId,
+    dataCid,
+    businessName,
+    address,
+    website,
+    latitude,
+    longitude
+  };
 }
 
 function mapScan(scan) {
   return {
     id: Number(scan.id),
-    clientId: Number(scan.clientId),
-    gbpProfileId: Number(scan.gbpProfileId),
+    clientId: scan.clientId == null ? null : Number(scan.clientId),
+    clientName: scan.client?.businessName || null,
+    gbpProfileId: scan.gbpProfileId == null ? null : Number(scan.gbpProfileId),
+    scanScope: scan.scanScope || 'CLIENT',
+    sourcePage: scan.sourcePage || null,
+    quickScanContext: scan.quickScanContext || null,
     gbpProfile: scan.gbpProfile
       ? {
         id: Number(scan.gbpProfile.id),
@@ -480,8 +541,17 @@ async function getValidatedClientAndProfile(db, clientId, gbpProfileId) {
 }
 
 function buildCreatePayload(payload) {
-  const clientId = parsePositiveInteger(payload.clientId, 'clientId');
-  const gbpProfileId = parseOptionalPositiveInteger(payload.gbpProfileId, 'gbpProfileId');
+  const scanScope = parseScanScope(payload.scanScope);
+  const sourcePage = String(payload.sourcePage || '').trim() || null;
+  const clientId = scanScope === 'CLIENT'
+    ? parsePositiveInteger(payload.clientId, 'clientId')
+    : null;
+  const gbpProfileId = scanScope === 'CLIENT'
+    ? parseOptionalPositiveInteger(payload.gbpProfileId, 'gbpProfileId')
+    : undefined;
+  const quickScanContext = scanScope === 'QUICK'
+    ? parseQuickScanContext(payload.quickScanContext)
+    : null;
   const keywords = parseKeywordList(payload);
   const coverage = parseCoveragePoints(payload.coverage || payload.coordinates);
   const labels = payload.labels === undefined ? [] : parseStringArray(payload.labels, 'labels');
@@ -527,8 +597,11 @@ function buildCreatePayload(payload) {
   const estimatedRequests = keywords.length * coverage.length;
 
   return {
+    scanScope,
+    sourcePage,
     clientId,
     gbpProfileId,
+    quickScanContext,
     keywords,
     coverage,
     coverageUnit,
@@ -546,11 +619,19 @@ function buildCreatePayload(payload) {
 
 async function createScan({ db, actorUserId, payload }) {
   const parsed = buildCreatePayload(payload);
-  const client = await getValidatedClientAndProfile(db, parsed.clientId, parsed.gbpProfileId);
+  let client = null;
+
+  if (parsed.scanScope === 'CLIENT') {
+    client = await getValidatedClientAndProfile(db, parsed.clientId, parsed.gbpProfileId);
+  }
+
   const created = await Promise.all(parsed.keywords.map((keyword) => db.scan.create({
     data: {
-      clientId: BigInt(parsed.clientId),
-      gbpProfileId: client.gbpProfile.id,
+      clientId: parsed.clientId ? BigInt(parsed.clientId) : null,
+      gbpProfileId: client?.gbpProfile?.id ?? null,
+      scanScope: parsed.scanScope,
+      sourcePage: parsed.sourcePage,
+      quickScanContext: parsed.quickScanContext,
       keyword,
       coverageUnit: parsed.coverageUnit,
       coveragePoints: parsed.coverage,
@@ -577,7 +658,14 @@ async function createScan({ db, actorUserId, payload }) {
   return created.map(mapScan);
 }
 
-async function listScans({ db, clientId, page = 1, limit = 20 }) {
+async function listScans({
+  db,
+  clientId,
+  page = 1,
+  limit = 20,
+  scope,
+  view
+}) {
   const scansPage = Number(page);
   const scansLimit = Number(limit);
   if (!Number.isInteger(scansPage) || scansPage <= 0) {
@@ -591,6 +679,25 @@ async function listScans({ db, clientId, page = 1, limit = 20 }) {
   if (clientId !== undefined) {
     where.clientId = BigInt(parsePositiveInteger(clientId, 'clientId'));
   }
+  const normalizedScope = scope ? String(scope).trim().toUpperCase() : '';
+  if (normalizedScope) {
+    if (!ALLOWED_SCAN_SCOPES.has(normalizedScope)) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'scope must be CLIENT, QUICK, or omitted.');
+    }
+    where.scanScope = normalizedScope;
+  }
+
+  const normalizedView = view ? String(view).trim().toLowerCase() : '';
+  if (normalizedView === 'deleted') {
+    where.status = 'DELETED';
+  } else if (normalizedView === 'recurring') {
+    where.recurrenceEnabled = true;
+    where.status = { not: 'DELETED' };
+  } else if (normalizedView && normalizedView !== 'history') {
+    throw new AppError(400, 'VALIDATION_ERROR', 'view must be history, recurring, deleted, or omitted.');
+  } else {
+    where.status = { not: 'DELETED' };
+  }
 
   const skip = (scansPage - 1) * scansLimit;
   const [total, scans] = await Promise.all([
@@ -598,6 +705,11 @@ async function listScans({ db, clientId, page = 1, limit = 20 }) {
     db.scan.findMany({
       where,
       include: {
+        client: {
+          select: {
+            businessName: true
+          }
+        },
         gbpProfile: true,
         runs: {
           orderBy: { id: 'desc' },
@@ -633,6 +745,11 @@ async function getScanById({ db, scanId }) {
   const scan = await db.scan.findUnique({
     where: { id: BigInt(scanId) },
     include: {
+      client: {
+        select: {
+          businessName: true
+        }
+      },
       gbpProfile: true,
       runs: {
         orderBy: { id: 'desc' },
@@ -653,6 +770,11 @@ async function getClientScanById({ db, clientId, scanId }) {
       clientId: BigInt(clientId)
     },
     include: {
+      client: {
+        select: {
+          businessName: true
+        }
+      },
       gbpProfile: true,
       runs: {
         orderBy: { id: 'desc' },
@@ -695,8 +817,12 @@ async function deleteScanKeyword({ db, scanId, keyword }) {
     throw new AppError(404, 'NOT_FOUND', 'Keyword not found in scan.');
   }
 
-  await db.scan.delete({
-    where: { id: BigInt(scanId) }
+  await db.scan.update({
+    where: { id: BigInt(scanId) },
+    data: {
+      status: 'DELETED',
+      nextRunAt: null
+    }
   });
 
   return {
@@ -828,18 +954,25 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
     for (const keyword of keywords) {
       for (const point of coveragePoints) {
         try {
+          const quickContext = scan.quickScanContext && typeof scan.quickScanContext === 'object'
+            ? scan.quickScanContext
+            : null;
           const ranking = await fetchDataForSeoRankings({
             db,
             env,
             requestedBy: actorUserId,
             payload: {
-              clientId: Number(scan.clientId),
+              clientId: scan.clientId == null ? undefined : Number(scan.clientId),
               keyword,
               languageCode: 'en',
               locationCoordinate: `${point.latitude},${point.longitude}`,
-              targetPlaceId: scan.gbpProfile?.placeId || undefined,
-              targetBusinessName: scan.gbpProfile?.title || undefined,
-              targetDomain: scan.client?.website || scan.gbpProfile?.website || undefined,
+              targetPlaceId: scan.gbpProfile?.placeId || quickContext?.placeId || undefined,
+              targetBusinessName: scan.gbpProfile?.title || quickContext?.businessName || undefined,
+              targetDomain:
+                scan.client?.website ||
+                scan.gbpProfile?.website ||
+                quickContext?.website ||
+                undefined,
               forceRefresh: true
             }
           });
@@ -867,9 +1000,13 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
               }
               : {
                 reason: 'GBP_NOT_FOUND_IN_RESULTS',
-                targetPlaceId: scan.gbpProfile?.placeId || null,
-                targetBusinessName: scan.gbpProfile?.title || null,
-                targetDomain: scan.client?.website || scan.gbpProfile?.website || null,
+                targetPlaceId: scan.gbpProfile?.placeId || quickContext?.placeId || null,
+                targetBusinessName: scan.gbpProfile?.title || quickContext?.businessName || null,
+                targetDomain:
+                  scan.client?.website ||
+                  scan.gbpProfile?.website ||
+                  quickContext?.website ||
+                  null,
                 topCandidates: ranking.topCandidates || []
               },
             apiLogId: ranking.logId ? BigInt(ranking.logId) : null
@@ -1362,6 +1499,89 @@ async function listScanRunKeywordSummary({ db, scanId, runId, page = 1, limit = 
   };
 }
 
+async function getQuickGbpPreview({ db, env, actorUserId, payload }) {
+  const placeId = String(payload?.placeId || '').trim();
+  const dataCid = String(payload?.dataCid || '').trim();
+
+  if (!placeId && !dataCid) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'placeId or dataCid is required.');
+  }
+
+  const response = await fetchSerpApiGbpDetails({
+    db,
+    env,
+    requestedBy: actorUserId,
+    payload: {
+      placeId: placeId || undefined,
+      dataCid: dataCid || undefined,
+      gl: payload?.gl,
+      hl: payload?.hl,
+      forceRefresh: payload?.forceRefresh
+    }
+  });
+
+  const raw = response?.raw && typeof response.raw === 'object' ? response.raw : {};
+  const placeResults = raw.place_results && typeof raw.place_results === 'object'
+    ? raw.place_results
+    : {};
+  const gpsCoordinates = raw.gps_coordinates && typeof raw.gps_coordinates === 'object'
+    ? raw.gps_coordinates
+    : {};
+  const coordinates = raw.coordinates && typeof raw.coordinates === 'object'
+    ? raw.coordinates
+    : {};
+  const latitudeCandidates = [
+    raw.latitude,
+    raw.lat,
+    gpsCoordinates.latitude,
+    gpsCoordinates.lat,
+    coordinates.latitude,
+    coordinates.lat
+  ];
+  const longitudeCandidates = [
+    raw.longitude,
+    raw.lng,
+    raw.lon,
+    gpsCoordinates.longitude,
+    gpsCoordinates.lng,
+    coordinates.longitude,
+    coordinates.lng
+  ];
+  const latitude = latitudeCandidates.find((value) => Number.isFinite(Number(value)));
+  const longitude = longitudeCandidates.find((value) => Number.isFinite(Number(value)));
+
+  return {
+    placeId:
+      String(
+        raw.place_id ||
+          placeResults.place_id ||
+          response.placeId ||
+          placeId ||
+          ''
+      ).trim() || null,
+    dataCid:
+      String(
+        raw.data_id ||
+          raw.data_cid ||
+          placeResults.data_id ||
+          response.dataCid ||
+          dataCid ||
+          ''
+      ).trim() || null,
+    businessName:
+      String(raw.title || raw.name || placeResults.title || '').trim() || null,
+    address:
+      String(raw.address || placeResults.address || '').trim() || null,
+    website:
+      String(raw.website || placeResults.website || '').trim() || null,
+    latitude:
+      latitude === undefined ? null : Number(Number(latitude).toFixed(7)),
+    longitude:
+      longitude === undefined ? null : Number(Number(longitude).toFixed(7)),
+    raw
+  };
+}
+
 async function getScanRunKeywordDetails({ db, scanId, runId }) {
   const run = await db.scanRun.findFirst({
     where: {
@@ -1551,7 +1771,11 @@ async function listClientLocalRankings({ db, clientId, page = 1, limit = 20 }) {
   }
 
   const scans = await db.scan.findMany({
-    where: { clientId: BigInt(clientId) },
+    where: {
+      clientId: BigInt(clientId),
+      scanScope: 'CLIENT',
+      status: { not: 'DELETED' }
+    },
     select: {
       id: true,
       createdAt: true,
@@ -1784,6 +2008,7 @@ async function clearSavedLocalRankingKeywords({ db, clientId, actorUserId }) {
 
 module.exports = {
   createScan,
+  getQuickGbpPreview,
   listScans,
   listClientLocalRankings,
   getSavedLocalRankingKeywords,

@@ -8,6 +8,7 @@ const router = express.Router();
 router.use(authenticateAccessToken);
 router.use(requireRole('ADMIN'));
 
+router.post('/quick/gbp-preview', scansController.getQuickGbpPreview);
 router.get('/', scansController.listScans);
 router.get('/client/:clientId/local-rankings', scansController.listClientLocalRankings);
 router.get('/client/:clientId/local-rankings/saved-keywords', scansController.getSavedLocalRankingKeywords);

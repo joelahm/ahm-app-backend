@@ -28,6 +28,30 @@ function readProjectId(req) {
   return id;
 }
 
+function readPostingId(req) {
+  const id = Number(req.params.postingId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid posting id.');
+  }
+  return id;
+}
+
+function readCommentId(req) {
+  const id = Number(req.params.commentId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid comment id.');
+  }
+  return id;
+}
+
+function readReviewId(req) {
+  const reviewId = String(req.params.reviewId || '').trim();
+  if (!reviewId) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid review id.');
+  }
+  return decodeURIComponent(reviewId);
+}
+
 async function listClients(req, res, next) {
   try {
     const clients = await clientsService.listClients({
@@ -66,6 +90,199 @@ async function getClientGbpDetails(req, res, next) {
     });
 
     res.status(200).json(gbpDetails);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function getClientGbpReviews(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const reviews = await clientsService.getClientGbpReviews({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      clientId,
+      requestedBy: req.auth.userId,
+      query: req.query || {}
+    });
+
+    res.status(200).json(reviews);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function saveClientReviewReplyDraft(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const reviewId = readReviewId(req);
+    const draft = await clientsService.saveClientReviewReplyDraft({
+      db: req.app.locals.db,
+      clientId,
+      reviewId,
+      actorUserId: req.auth.userId,
+      payload: req.body || {}
+    });
+
+    res.status(200).json({ draft });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listClientGbpPostings(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const postings = await clientsService.listClientGbpPostings({
+      db: req.app.locals.db,
+      clientId
+    });
+
+    res.status(200).json({
+      postings,
+      total: postings.length
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createClientGbpPostings(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const postings = await clientsService.createClientGbpPostings({
+      db: req.app.locals.db,
+      clientId,
+      actorUserId: req.auth.userId,
+      payload: req.body || {}
+    });
+
+    res.status(201).json({
+      postings,
+      total: postings.length
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function generateClientGbpPostings(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const result = await clientsService.generateClientGbpPostings({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      clientId,
+      actorUserId: req.auth.userId,
+      payload: req.body || {}
+    });
+
+    res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function generateClientGbpPostingContent(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const postingId = readPostingId(req);
+    const result = await clientsService.generateClientGbpPostingContent({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      clientId,
+      postingId,
+      actorUserId: req.auth.userId,
+      payload: req.body || {}
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function patchClientGbpPosting(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const postingId = readPostingId(req);
+    const posting = await clientsService.updateClientGbpPosting({
+      db: req.app.locals.db,
+      clientId,
+      postingId,
+      payload: req.body || {}
+    });
+
+    res.status(200).json({ posting });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteClientGbpPosting(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const postingId = readPostingId(req);
+    await clientsService.deleteClientGbpPosting({
+      db: req.app.locals.db,
+      clientId,
+      postingId
+    });
+
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listClientGbpPostingComments(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const postingId = readPostingId(req);
+    const comments = await clientsService.listClientGbpPostingComments({
+      db: req.app.locals.db,
+      clientId,
+      postingId
+    });
+
+    res.status(200).json({ comments, total: comments.length });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createClientGbpPostingComment(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const postingId = readPostingId(req);
+    const comment = await clientsService.createClientGbpPostingComment({
+      db: req.app.locals.db,
+      clientId,
+      postingId,
+      actorUserId: req.auth.userId,
+      payload: req.body || {}
+    });
+
+    res.status(201).json({ comment });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteClientGbpPostingComment(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const postingId = readPostingId(req);
+    const commentId = readCommentId(req);
+    await clientsService.deleteClientGbpPostingComment({
+      db: req.app.locals.db,
+      clientId,
+      postingId,
+      commentId,
+      actorUserId: req.auth.userId
+    });
+
+    res.status(204).send();
   } catch (err) {
     next(err);
   }
@@ -303,6 +520,17 @@ module.exports = {
   listClients,
   getClientById,
   getClientGbpDetails,
+  getClientGbpReviews,
+  saveClientReviewReplyDraft,
+  listClientGbpPostings,
+  createClientGbpPostings,
+  generateClientGbpPostings,
+  generateClientGbpPostingContent,
+  patchClientGbpPosting,
+  deleteClientGbpPosting,
+  listClientGbpPostingComments,
+  createClientGbpPostingComment,
+  deleteClientGbpPostingComment,
   listClientCitations,
   createClient,
   patchClient,

@@ -2,8 +2,11 @@ const { randomUUID } = require('crypto');
 const { AppError } = require('../../lib/errors');
 
 const CITATION_DATABASE_SETTINGS_KEY = 'citation_database';
-const ALLOWED_TYPES = new Set(['General Directory', 'Medical Directory']);
-const ALLOWED_PAYMENTS = new Set(['Free', 'Paid']);
+const MAX_CITATION_NICHE_LENGTH = 255;
+const ALLOWED_TYPES = new Set(['General', 'Industry', 'Location']);
+const ALLOWED_PAYMENTS = new Set(['Free', 'Paid', 'Free/Paid']);
+const CITATION_STATUS_PUBLISHED = 'Published';
+const CITATION_STATUS_NOT_PUBLISHED = 'Not Published';
 
 function asObject(value) {
   return typeof value === 'object' && value !== null ? value : {};
@@ -43,9 +46,11 @@ function normalizeStoredCitation(value) {
     name: asString(source.name || source.directorySite),
     type: asString(source.type),
     niche: asString(source.niche),
+    iconUrl: asString(source.iconUrl || source.icon_url),
     validationLink: asString(source.validationLink),
     da: asNumber(source.da),
     payment: asString(source.payment),
+    status: asString(source.status) || CITATION_STATUS_PUBLISHED,
     createdAt: asString(source.createdAt) || new Date().toISOString(),
     updatedAt:
       asString(source.updatedAt) ||
@@ -73,14 +78,54 @@ function parseStoredCitationDatabaseValue(value) {
   };
 }
 
-function normalizeCitationPayload(payload) {
+function normalizeCitationName(value) {
+  return asString(value)
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function normalizeCitationValidationLink(value) {
+  const rawValue = asString(value).trim();
+
+  if (!rawValue) {
+    return '';
+  }
+
+  const candidate = /^[a-z]+:\/\//i.test(rawValue) ? rawValue : `https://${rawValue}`;
+
+  try {
+    const parsed = new URL(candidate);
+    const hostname = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    const pathname = parsed.pathname.replace(/\/+$/, '');
+
+    return `${hostname}${pathname}` || hostname;
+  } catch {
+    return rawValue
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/^www\./, '')
+      .replace(/\/+$/, '');
+  }
+}
+
+function normalizeCitationPayload(payload, options = {}) {
   const source = asObject(payload);
   const name = asString(source.name).trim();
-  const type = asString(source.type).trim();
+  const rawType = asString(source.type).trim();
   const niche = asString(source.niche).trim();
   const validationLink = asString(source.validationLink).trim();
-  const payment = asString(source.payment).trim();
+  const rawPayment = asString(source.payment).trim();
   const da = asNumber(source.da, NaN);
+  const allowTypeFallback = options.allowTypeFallback === true;
+  const allowPaymentFallback = options.allowPaymentFallback === true;
+  const type = rawType && ALLOWED_TYPES.has(rawType) ? rawType : allowTypeFallback ? 'General' : rawType;
+  const payment =
+    rawPayment && ALLOWED_PAYMENTS.has(rawPayment)
+      ? rawPayment
+      : allowPaymentFallback
+        ? 'Free'
+        : rawPayment;
 
   if (!name) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Citation name is required.');
@@ -92,6 +137,14 @@ function normalizeCitationPayload(payload) {
 
   if (!niche) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Niche is required.');
+  }
+
+  if (niche.length > MAX_CITATION_NICHE_LENGTH) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      `Niche must be ${MAX_CITATION_NICHE_LENGTH} characters or fewer.`,
+    );
   }
 
   if (!validationLink) {
@@ -109,15 +162,93 @@ function normalizeCitationPayload(payload) {
   return { da, name, niche, payment, type, validationLink };
 }
 
+async function listExistingCitationCandidates({ db, excludeCitationId = null }) {
+  const records = await db.citationDatabaseEntry.findMany({
+    select: {
+      id: true,
+      name: true,
+      validationLink: true,
+    },
+  });
+
+  return records.filter((record) => record.id !== excludeCitationId);
+}
+
+function resolveCitationStatus({
+  existingCandidates,
+  normalizedPayload,
+  seenNames,
+  seenValidationLinks,
+}) {
+  const normalizedName = normalizeCitationName(normalizedPayload.name);
+  const normalizedValidationLink = normalizeCitationValidationLink(
+    normalizedPayload.validationLink,
+  );
+
+  const hasNameDuplicate =
+    !!normalizedName &&
+    (existingCandidates.some(
+      (candidate) => normalizeCitationName(candidate.name) === normalizedName,
+    ) || seenNames.has(normalizedName));
+
+  const hasValidationLinkDuplicate =
+    !!normalizedValidationLink &&
+    (existingCandidates.some(
+      (candidate) =>
+        normalizeCitationValidationLink(candidate.validationLink) ===
+        normalizedValidationLink,
+    ) || seenValidationLinks.has(normalizedValidationLink));
+
+  if (normalizedName) {
+    seenNames.add(normalizedName);
+  }
+
+  if (normalizedValidationLink) {
+    seenValidationLinks.add(normalizedValidationLink);
+  }
+
+  return hasNameDuplicate || hasValidationLinkDuplicate
+    ? CITATION_STATUS_NOT_PUBLISHED
+    : CITATION_STATUS_PUBLISHED;
+}
+
+function hasCitationDuplicates({ existingCandidates, normalizedPayload }) {
+  const normalizedName = normalizeCitationName(normalizedPayload.name);
+  const normalizedValidationLink = normalizeCitationValidationLink(
+    normalizedPayload.validationLink,
+  );
+
+  const hasDuplicateName =
+    !!normalizedName &&
+    existingCandidates.some(
+      (candidate) => normalizeCitationName(candidate.name) === normalizedName,
+    );
+
+  const hasDuplicateValidationLink =
+    !!normalizedValidationLink &&
+    existingCandidates.some(
+      (candidate) =>
+        normalizeCitationValidationLink(candidate.validationLink) ===
+        normalizedValidationLink,
+    );
+
+  return {
+    hasDuplicateName,
+    hasDuplicateValidationLink,
+  };
+}
+
 function mapCitationRecord(record) {
   return {
     id: asString(record.id),
     name: asString(record.name),
     type: asString(record.type),
     niche: asString(record.niche),
+    iconUrl: asString(record.iconUrl),
     validationLink: asString(record.validationLink),
     da: asNumber(record.da),
     payment: asString(record.payment),
+    status: asString(record.status) || CITATION_STATUS_PUBLISHED,
     createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : asString(record.createdAt),
     updatedAt: record.updatedAt instanceof Date ? record.updatedAt.toISOString() : asString(record.updatedAt),
     createdBy: {
@@ -162,6 +293,7 @@ async function migrateLegacyCitationsIfNeeded({ db }) {
         validationLink: citation.validationLink,
         da: citation.da,
         payment: citation.payment,
+        status: citation.status || CITATION_STATUS_PUBLISHED,
         createdBy,
         createdAt: new Date(citation.createdAt),
         updatedAt: new Date(citation.updatedAt),
@@ -173,6 +305,7 @@ async function migrateLegacyCitationsIfNeeded({ db }) {
         validationLink: citation.validationLink,
         da: citation.da,
         payment: citation.payment,
+        status: citation.status || CITATION_STATUS_PUBLISHED,
         createdBy,
         createdAt: new Date(citation.createdAt),
         updatedAt: new Date(citation.updatedAt),
@@ -208,11 +341,25 @@ async function createCitation({ db, actorUserId, payload }) {
   await migrateLegacyCitationsIfNeeded({ db });
   const normalizedPayload = normalizeCitationPayload(payload);
   const createdBy = await buildActorId({ db, actorUserId });
+  const existingCandidates = await listExistingCitationCandidates({ db });
+  const { hasDuplicateName, hasDuplicateValidationLink } = hasCitationDuplicates({
+    existingCandidates,
+    normalizedPayload,
+  });
+
+  if (hasDuplicateName || hasDuplicateValidationLink) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'Duplicate citation name or validation link already exists.',
+    );
+  }
 
   const citation = await db.citationDatabaseEntry.create({
     data: {
       id: `citation-${randomUUID()}`,
       ...normalizedPayload,
+      status: CITATION_STATUS_PUBLISHED,
       createdBy,
     },
     include: {
@@ -234,9 +381,29 @@ async function updateCitation({ db, citationId, payload }) {
     throw new AppError(404, 'NOT_FOUND', 'Citation not found.');
   }
 
+  const existingCandidates = await listExistingCitationCandidates({
+    db,
+    excludeCitationId: citationId,
+  });
+  const { hasDuplicateName, hasDuplicateValidationLink } = hasCitationDuplicates({
+    existingCandidates,
+    normalizedPayload,
+  });
+
+  if (hasDuplicateName || hasDuplicateValidationLink) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'Duplicate citation name or validation link already exists.',
+    );
+  }
+
   const citation = await db.citationDatabaseEntry.update({
     where: { id: citationId },
-    data: normalizedPayload,
+    data: {
+      ...normalizedPayload,
+      status: CITATION_STATUS_PUBLISHED,
+    },
     include: {
       creator: {
         select: { id: true, firstName: true, lastName: true, email: true }
@@ -268,15 +435,30 @@ async function bulkCreateCitations({ db, actorUserId, payload }) {
     throw new AppError(400, 'VALIDATION_ERROR', 'At least one citation is required.');
   }
 
-  const normalizedCitations = citations.map((citation) => normalizeCitationPayload(citation));
+  const normalizedCitations = citations.map((citation) =>
+    normalizeCitationPayload(citation, {
+      allowPaymentFallback: true,
+      allowTypeFallback: true,
+    }),
+  );
   const createdBy = await buildActorId({ db, actorUserId });
+  const existingCandidates = await listExistingCitationCandidates({ db });
+  const seenNames = new Set();
+  const seenValidationLinks = new Set();
 
   const createdCitations = [];
   for (const citation of normalizedCitations) {
+    const status = resolveCitationStatus({
+      existingCandidates,
+      normalizedPayload: citation,
+      seenNames,
+      seenValidationLinks,
+    });
     const created = await db.citationDatabaseEntry.create({
       data: {
         id: `citation-${randomUUID()}`,
         ...citation,
+        status,
         createdBy,
       },
       include: {

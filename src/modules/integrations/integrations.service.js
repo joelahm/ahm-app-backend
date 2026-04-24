@@ -1415,9 +1415,6 @@ async function fetchSerpApiGbpDetails({ db, env, requestedBy, payload }) {
   requireSerpApiConfig(env);
 
   const clientId = parseOptionalId(payload.clientId, 'clientId');
-  if (!clientId) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'clientId is required for GBP details.');
-  }
   await assertContextExists(db, clientId);
   const forceRefresh = parseBooleanLike(payload.forceRefresh);
   let storedProfile = null;
@@ -1459,18 +1456,22 @@ async function fetchSerpApiGbpDetails({ db, env, requestedBy, payload }) {
       ttlMinutes: env.integrations.serpApi.cacheTtlMinutes
     });
     if (cached) {
-      await upsertClientGbpProfile({
-        db,
-        clientId,
-        placeId: resolvedPlaceId,
-        dataCid: resolvedDataCid,
-        responsePayload: cached.responsePayload
-      });
+      if (clientId) {
+        await upsertClientGbpProfile({
+          db,
+          clientId,
+          placeId: resolvedPlaceId,
+          dataCid: resolvedDataCid,
+          responsePayload: cached.responsePayload
+        });
+      }
 
-      const profile = await db.clientGbpProfile.findUnique({
-        where: { clientId: BigInt(clientId) },
-        select: { id: true, placeId: true, dataCid: true, lastSyncedAt: true }
-      });
+      const profile = clientId
+        ? await db.clientGbpProfile.findUnique({
+          where: { clientId: BigInt(clientId) },
+          select: { id: true, placeId: true, dataCid: true, lastSyncedAt: true }
+        })
+        : null;
 
       return {
         logId: Number(cached.id),
@@ -1515,18 +1516,22 @@ async function fetchSerpApiGbpDetails({ db, env, requestedBy, payload }) {
     });
   }
 
-  await upsertClientGbpProfile({
-    db,
-    clientId,
-    placeId: resolvedPlaceId,
-    dataCid: resolvedDataCid,
-    responsePayload
-  });
+  if (clientId) {
+    await upsertClientGbpProfile({
+      db,
+      clientId,
+      placeId: resolvedPlaceId,
+      dataCid: resolvedDataCid,
+      responsePayload
+    });
+  }
 
-  const profile = await db.clientGbpProfile.findUnique({
-    where: { clientId: BigInt(clientId) },
-    select: { id: true, placeId: true, dataCid: true, lastSyncedAt: true }
-  });
+  const profile = clientId
+    ? await db.clientGbpProfile.findUnique({
+      where: { clientId: BigInt(clientId) },
+      select: { id: true, placeId: true, dataCid: true, lastSyncedAt: true }
+    })
+    : null;
 
   return {
     logId: Number(log.id),
@@ -1553,8 +1558,13 @@ async function fetchSerpApiReviews({ db, env, requestedBy, payload }) {
     engine: 'google_maps_reviews',
     hl: optionalString(payload.hl) || 'en'
   });
-  if (payload.placeId) params.set('place_id', String(payload.placeId).trim());
-  if (payload.dataId) params.set('data_id', String(payload.dataId).trim());
+  const dataId = String(payload.dataId || '').trim();
+  const placeId = String(payload.placeId || '').trim();
+  if (dataId) {
+    params.set('data_id', dataId);
+  } else if (placeId) {
+    params.set('place_id', placeId);
+  }
   if (payload.nextPageToken) params.set('next_page_token', String(payload.nextPageToken).trim());
   if (payload.sortBy) params.set('sort_by', String(payload.sortBy).trim());
   if (!params.get('place_id') && !params.get('data_id')) {
@@ -1619,7 +1629,7 @@ async function fetchSerpApiReviews({ db, env, requestedBy, payload }) {
   };
 }
 
-async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt }) {
+async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt, maxCharacters = null, auditContext = null }) {
   requireOpenAiConfig(env);
 
   const operation = 'GENERATE_TEXT';
@@ -1631,7 +1641,7 @@ async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt
         content: [{ type: 'input_text', text: prompt }],
       },
     ],
-    max_output_tokens: Number(env.integrations.openai.maxOutputTokens || 120),
+    max_output_tokens: Number(maxCharacters || env.integrations.openai.maxOutputTokens || 120),
     model: env.integrations.openai.model,
   };
 
@@ -1657,6 +1667,7 @@ async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt
     requestMethod: 'POST',
     requestPayload: {
       ...requestPayload,
+      auditContext,
       // Keep logs lighter and avoid persisting the full prompt repeatedly.
       input: '[redacted]',
     },
@@ -1692,6 +1703,11 @@ async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
 
   const prompt = requireString(payload.prompt, 'prompt');
   const provider = normalizeAiProvider(payload.provider || env.integrations.aiTitleProvider);
+  const maxCharacters = payload.maxCharacters ? Number(payload.maxCharacters) : null;
+  const auditContext =
+    payload.auditContext && typeof payload.auditContext === 'object' && !Array.isArray(payload.auditContext)
+      ? payload.auditContext
+      : null;
 
   if (provider === 'OPENAI') {
     return fetchOpenAiGeneratedText({
@@ -1700,6 +1716,8 @@ async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
       requestedBy,
       clientId,
       prompt,
+      maxCharacters,
+      auditContext,
     });
   }
 
@@ -1739,7 +1757,7 @@ async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
       requestedBy,
       endpoint: createEndpoint,
       requestMethod: 'POST',
-      requestPayload: createRequestPayload,
+      requestPayload: { ...createRequestPayload, auditContext },
       responseStatusCode: createResponse.status,
       responsePayload: createPayload,
       isSuccess: false,

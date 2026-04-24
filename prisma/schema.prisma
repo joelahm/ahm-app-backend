@@ -72,6 +72,11 @@ model User {
   createdAiPrompts            AiPrompt[] @relation("AiPromptCreatedBy")
   createdCitationDatabaseEntries CitationDatabaseEntry[] @relation("CitationDatabaseEntryCreatedBy")
   createdKeywordContentLists    KeywordContentList[] @relation("KeywordContentListCreatedBy")
+  createdReviewReplyDrafts      ClientReviewReplyDraft[] @relation("ClientReviewReplyDraftCreatedBy")
+  updatedReviewReplyDrafts      ClientReviewReplyDraft[] @relation("ClientReviewReplyDraftUpdatedBy")
+  createdGbpPostings            ClientGbpPosting[] @relation("ClientGbpPostingCreatedBy")
+  assignedGbpPostings           ClientGbpPosting[] @relation("ClientGbpPostingAssignedTo")
+  createdGbpPostingComments     ClientGbpPostingComment[] @relation("ClientGbpPostingCommentCreatedBy")
 
   @@index([roleCode], map: "idx_users_role_code")
   @@index([status, isActive], map: "idx_users_status_active")
@@ -174,12 +179,15 @@ model Client {
   businessName                  String    @map("business_name") @db.VarChar(180)
   niche                         String    @db.VarChar(255)
   personalEmail                 String    @map("personal_email") @db.VarChar(255)
+  personalPhone                 String?   @map("personal_phone") @db.VarChar(64)
   practiceEmail                 String    @map("practice_email") @db.VarChar(255)
   businessPhone                 String    @map("business_phone") @db.VarChar(64)
   website                       String?   @db.VarChar(255)
   country                       String    @db.VarChar(120)
   typeOfPractice                String?   @map("type_of_practice") @db.VarChar(180)
   profession                    String?   @db.VarChar(180)
+  practiceStructure             String?   @map("practice_structure") @db.VarChar(180)
+  gmcRegistrationNumber         String?   @map("gmc_registration_number") @db.VarChar(120)
   topMedicalSpecialties         Json?     @map("top_medical_specialties")
   otherMedicalSpecialties       Json?     @map("other_medical_specialties")
   subSpecialties                Json?     @map("sub_specialties")
@@ -187,15 +195,23 @@ model Client {
   topTreatments                 Json?     @map("top_treatments")
   practiceIntroduction          String?   @map("practice_introduction") @db.Text
   uniqueToCompetitors           String?   @map("unique_to_competitors") @db.Text
+  credentials                   String?   @db.Text
+  majorAccomplishments          String?   @map("major_accomplishments") @db.Text
   highQualityHeadshot           Json?     @map("high_quality_headshot")
   yourCv                        Json?     @map("your_cv")
   practiceLocationInteriorPhoto Json?     @map("practice_location_interior_photo")
   practiceLocationExteriorPhoto Json?     @map("practice_location_exterior_photo")
+  otherImages                   Json?     @map("other_images")
+  buildingName                  String?   @map("building_name") @db.VarChar(255)
+  unitNumber                    String?   @map("unit_number") @db.VarChar(120)
+  streetAddress                 String?   @map("street_address") @db.VarChar(255)
+  region                        String?   @db.VarChar(180)
   addressLine1                  String?   @map("address_line_1") @db.VarChar(255)
   addressLine2                  String?   @map("address_line_2") @db.VarChar(255)
   cityState                     String?   @map("city_state") @db.VarChar(180)
   postCode                      String?   @map("post_code") @db.VarChar(64)
   visibleArea                   String?   @map("visible_area") @db.VarChar(255)
+  nearbyAreasServed             String?   @map("nearby_areas_served") @db.VarChar(500)
   practiceHours                 Json?     @map("practice_hours")
   gbpLink                       String?   @map("gbp_link") @db.VarChar(255)
   facebook                      String?   @db.VarChar(255)
@@ -227,6 +243,8 @@ model Client {
   scans                         Scan[]
   generatedSchemas              GeneratedSchema[]
   aiPrompts                     AiPrompt[]
+  reviewReplyDrafts             ClientReviewReplyDraft[]
+  gbpPostings                   ClientGbpPosting[]
 
   @@index([businessName], map: "idx_clients_business_name")
   @@index([practiceEmail], map: "idx_clients_practice_email")
@@ -242,6 +260,8 @@ model ClientProject {
   project                String   @db.VarChar(180)
   clientSuccessManagerId BigInt?  @map("client_success_manager_id") @db.UnsignedBigInt
   accountManagerId       BigInt?  @map("account_manager_id") @db.UnsignedBigInt
+  startDate              DateTime? @map("start_date")
+  dueDate                DateTime? @map("due_date")
   phase                  String   @db.VarChar(120)
   progress               String   @db.VarChar(120)
   createdBy              BigInt?  @map("created_by") @db.UnsignedBigInt
@@ -283,21 +303,25 @@ model ProjectTemplate {
 model ClientCitation {
   id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   clientId      BigInt   @map("client_id") @db.UnsignedBigInt
+  citationDatabaseEntryId String? @map("citation_database_entry_id") @db.VarChar(64)
   directoryName String   @map("directory_name") @db.VarChar(180)
   status        String   @default("NOT_SYNCED") @db.VarChar(64)
   profileUrl    String?  @map("profile_url") @db.VarChar(500)
   username      String?  @db.VarChar(255)
   password      String?  @db.VarChar(255)
   notes         String?  @db.Text
+  verificationStatus Json? @map("verification_status")
   createdBy     BigInt?  @map("created_by") @db.UnsignedBigInt
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_citations_client")
+  citationDatabaseEntry CitationDatabaseEntry? @relation(fields: [citationDatabaseEntryId], references: [id], onDelete: SetNull, map: "fk_client_citations_citation_database_entry")
   creator       User?    @relation("ClientCitationCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_citations_created_by")
 
   @@unique([clientId, directoryName], map: "uq_client_citations_client_directory")
   @@index([clientId], map: "idx_client_citations_client_id")
+  @@index([citationDatabaseEntryId], map: "idx_client_citations_citation_database_entry_id")
   @@index([status], map: "idx_client_citations_status")
   @@index([createdBy], map: "idx_client_citations_created_by")
   @@map("client_citations")
@@ -306,6 +330,7 @@ model ClientCitation {
 model ProjectTask {
   id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   projectId   BigInt    @map("project_id") @db.UnsignedBigInt
+  parentTaskId BigInt?  @map("parent_task_id") @db.UnsignedBigInt
   task        String    @db.VarChar(180)
   projectType String?   @map("project_type") @db.VarChar(120)
   description String?   @db.Text
@@ -319,11 +344,14 @@ model ProjectTask {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   project     ClientProject @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_project_tasks_project")
+  parentTask  ProjectTask?  @relation("ProjectTaskHierarchy", fields: [parentTaskId], references: [id], onDelete: SetNull, map: "fk_project_tasks_parent_task")
+  subtasks    ProjectTask[] @relation("ProjectTaskHierarchy")
   assignedUser User?        @relation("ProjectTaskAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull, map: "fk_project_tasks_assigned_to")
   creator      User?        @relation("ProjectTaskCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_project_tasks_created_by")
   comments     TaskComment[]
 
   @@index([projectId], map: "idx_project_tasks_project_id")
+  @@index([parentTaskId], map: "idx_project_tasks_parent_task_id")
   @@index([assignedTo], map: "idx_project_tasks_assigned_to")
   @@index([createdBy], map: "idx_project_tasks_created_by")
   @@map("project_tasks")
@@ -499,10 +527,90 @@ model ClientGbpProfile {
   @@map("client_gbp_profiles")
 }
 
+model ClientReviewReplyDraft {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId     BigInt   @map("client_id") @db.UnsignedBigInt
+  reviewId     String   @map("review_id") @db.VarChar(255)
+  reviewerName String?  @map("reviewer_name") @db.VarChar(255)
+  rating       Int?     @db.UnsignedTinyInt
+  reviewText   String?  @map("review_text") @db.Text
+  replyText    String   @map("reply_text") @db.Text
+  status       String   @default("DRAFT") @db.VarChar(32)
+  createdBy    BigInt?  @map("created_by") @db.UnsignedBigInt
+  updatedBy    BigInt?  @map("updated_by") @db.UnsignedBigInt
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_review_reply_drafts_client")
+  creator      User?    @relation("ClientReviewReplyDraftCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_review_reply_drafts_created_by")
+  updater      User?    @relation("ClientReviewReplyDraftUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull, map: "fk_client_review_reply_drafts_updated_by")
+
+  @@unique([clientId, reviewId], map: "uq_client_review_reply_drafts_client_review")
+  @@index([clientId], map: "idx_client_review_reply_drafts_client_id")
+  @@index([createdBy], map: "idx_client_review_reply_drafts_created_by")
+  @@index([updatedBy], map: "idx_client_review_reply_drafts_updated_by")
+  @@index([status], map: "idx_client_review_reply_drafts_status")
+  @@map("client_review_reply_drafts")
+}
+
+model ClientGbpPosting {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId        BigInt    @map("client_id") @db.UnsignedBigInt
+  keyword         String    @db.VarChar(255)
+  audience        String?   @db.VarChar(255)
+  languageCode    String    @default("en") @map("language_code") @db.VarChar(16)
+  language        String    @default("English") @db.VarChar(120)
+  contentType     String    @map("content_type") @db.VarChar(64)
+  buttonType      String?   @map("button_type") @db.VarChar(64)
+  assigneeId      BigInt?   @map("assignee_id") @db.UnsignedBigInt
+  description     String?   @db.Text
+  postContent     String?   @map("post_content") @db.Text
+  images          Json?     @map("images")
+  liveLink        String?   @map("live_link") @db.VarChar(512)
+  status          String    @default("Draft") @db.VarChar(64)
+  scheduledAt     DateTime? @map("scheduled_at")
+  publishedAt     DateTime? @map("published_at")
+  createdBy       BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_gbp_postings_client")
+  creator         User?     @relation("ClientGbpPostingCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_gbp_postings_created_by")
+  assignee        User?     @relation("ClientGbpPostingAssignedTo", fields: [assigneeId], references: [id], onDelete: SetNull, map: "fk_client_gbp_postings_assignee")
+  comments        ClientGbpPostingComment[]
+
+  @@index([clientId], map: "idx_client_gbp_postings_client_id")
+  @@index([createdBy], map: "idx_client_gbp_postings_created_by")
+  @@index([assigneeId], map: "idx_client_gbp_postings_assignee_id")
+  @@index([status], map: "idx_client_gbp_postings_status")
+  @@index([createdAt], map: "idx_client_gbp_postings_created_at")
+  @@map("client_gbp_postings")
+}
+
+model ClientGbpPostingComment {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  postingId BigInt   @map("posting_id") @db.UnsignedBigInt
+  comment   String   @db.Text
+  createdBy BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  posting   ClientGbpPosting @relation(fields: [postingId], references: [id], onDelete: Cascade, map: "fk_client_gbp_posting_comments_posting")
+  creator   User?            @relation("ClientGbpPostingCommentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_gbp_posting_comments_created_by")
+
+  @@index([postingId], map: "idx_client_gbp_posting_comments_posting_id")
+  @@index([createdBy], map: "idx_client_gbp_posting_comments_created_by")
+  @@index([createdAt], map: "idx_client_gbp_posting_comments_created_at")
+  @@map("client_gbp_posting_comments")
+}
+
 model Scan {
   id                BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
-  clientId          BigInt           @map("client_id") @db.UnsignedBigInt
-  gbpProfileId      BigInt           @map("gbp_profile_id") @db.UnsignedBigInt
+  clientId          BigInt?          @map("client_id") @db.UnsignedBigInt
+  gbpProfileId      BigInt?          @map("gbp_profile_id") @db.UnsignedBigInt
+  scanScope         String           @default("CLIENT") @map("scan_scope") @db.VarChar(32)
+  sourcePage        String?          @map("source_page") @db.VarChar(64)
+  quickScanContext  Json?            @map("quick_scan_context")
   keyword           String           @db.VarChar(255)
   coverageUnit      String           @map("coverage_unit") @db.VarChar(32)
   coveragePoints    Json             @map("coverage_points")
@@ -519,14 +627,16 @@ model Scan {
   createdAt         DateTime         @default(now()) @map("created_at")
   updatedAt         DateTime         @updatedAt @map("updated_at")
 
-  client            Client           @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_scans_client")
-  gbpProfile        ClientGbpProfile @relation(fields: [gbpProfileId], references: [id], onDelete: Cascade, map: "fk_scans_gbp_profile")
+  client            Client?          @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_scans_client")
+  gbpProfile        ClientGbpProfile? @relation(fields: [gbpProfileId], references: [id], onDelete: Cascade, map: "fk_scans_gbp_profile")
   creator           User?            @relation("ScanCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_scans_created_by")
   runs              ScanRun[]
 
   @@index([clientId], map: "idx_scans_client_id")
   @@index([gbpProfileId], map: "idx_scans_gbp_profile_id")
   @@index([keyword], map: "idx_scans_keyword")
+  @@index([scanScope], map: "idx_scans_scan_scope")
+  @@index([sourcePage], map: "idx_scans_source_page")
   @@index([status], map: "idx_scans_status")
   @@index([nextRunAt], map: "idx_scans_next_run_at")
   @@index([createdBy], map: "idx_scans_created_by")
@@ -637,17 +747,21 @@ model CitationDatabaseEntry {
   id             String   @id @db.VarChar(64)
   name           String   @db.VarChar(180)
   type           String   @db.VarChar(64)
-  niche          String   @db.VarChar(180)
+  niche          String   @db.VarChar(255)
+  iconUrl        String?  @map("icon_url") @db.VarChar(512)
   validationLink String   @map("validation_link") @db.VarChar(500)
   da             Int
   payment        String   @db.VarChar(32)
+  status         String   @default("Published") @db.VarChar(32)
   createdBy      BigInt?  @map("created_by") @db.UnsignedBigInt
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   creator        User?    @relation("CitationDatabaseEntryCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_citation_database_entries_created_by")
+  clientCitations ClientCitation[]
 
   @@index([createdBy], map: "idx_citation_database_entries_created_by")
+  @@index([status], map: "idx_citation_database_entries_status")
   @@index([updatedAt], map: "idx_citation_database_entries_updated_at")
   @@map("citation_database_entries")
 }
