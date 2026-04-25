@@ -6,6 +6,7 @@ const { requireRole } = require('../../middleware/requireRole');
 const router = express.Router();
 
 router.get('/dataforseo/google-ads-reference/sync', integrationsController.syncDataForSeoGoogleAdsReferenceData);
+router.get('/dataforseo/google-ads-locations/countries', integrationsController.listDataForSeoKeywordCountries);
 
 router.use(authenticateAccessToken);
 router.use(requireRole('ADMIN'));
@@ -16,7 +17,6 @@ router.post('/dataforseo/gbp-posts', integrationsController.dataForSeoGbpPosts);
 router.post('/dataforseo/google-ads-reference/sync', integrationsController.syncDataForSeoGoogleAdsReferenceData);
 router.post('/dataforseo/google-ads-locations/sync', integrationsController.syncDataForSeoGoogleAdsLocations);
 router.get('/dataforseo/google-ads-languages', integrationsController.listDataForSeoKeywordLanguages);
-router.get('/dataforseo/google-ads-locations/countries', integrationsController.listDataForSeoKeywordCountries);
 router.get('/dataforseo/google-ads-locations/regions', integrationsController.listDataForSeoKeywordRegions);
 router.post('/dataforseo/keywords/overview', integrationsController.dataForSeoKeywordOverview);
 router.post('/dataforseo/keywords/similar', integrationsController.dataForSeoSimilarKeywords);

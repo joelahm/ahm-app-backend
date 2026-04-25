@@ -36,6 +36,7 @@ model User {
   lastName          String?        @map("last_name") @db.VarChar(120)
   avatarUrl         String?        @map("avatar_url") @db.VarChar(512)
   title             String?        @db.VarChar(120)
+  department        String?        @db.VarChar(64)
   phoneNumber       String?        @map("phone_number") @db.VarChar(64)
   country           String?        @db.VarChar(120)
   timezone          String?        @db.VarChar(64)
@@ -621,6 +622,8 @@ model Scan {
   remainingRuns     Int?             @map("remaining_runs") @db.UnsignedInt
   startAt           DateTime?        @map("start_at")
   nextRunAt         DateTime?        @map("next_run_at")
+  timezone          String?          @db.VarChar(64)
+  notes             String?          @db.Text
   estimatedRequests Int              @map("estimated_requests") @db.UnsignedInt
   status            String           @default("ACTIVE") @db.VarChar(32)
   createdBy         BigInt?          @map("created_by") @db.UnsignedBigInt

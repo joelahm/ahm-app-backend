@@ -8,6 +8,14 @@ const path = require('path');
 
 const ALLOWED_ROLES = new Set(['ADMIN', 'TEAM_MEMBER', 'GUEST']);
 const ALLOWED_STATUS = new Set(['ACTIVE', 'DISABLED', 'LOCKED', 'DELETED']);
+const ALLOWED_DEPARTMENTS = new Set([
+  'CSM',
+  'SEO',
+  'Designer',
+  'Web Development',
+  'Operations',
+  'Management'
+]);
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PERMISSIONS_SETTINGS_KEY = 'workspace_permissions';
 
@@ -377,10 +385,9 @@ function mapUserSummary(user) {
     lastName: user.lastName,
     avatarUrl: user.avatarUrl ?? null,
     title: user.title ?? null,
+    department: user.department ?? null,
     phoneNumber: user.phoneNumber ?? null,
     country: user.country ?? null,
-    timezone: user.timezone ?? null,
-    dateFormat: user.dateFormat ?? null,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   };
@@ -455,10 +462,9 @@ async function listUsers({ db, page = 1, limit = 20 }) {
         lastName: true,
         avatarUrl: true,
         title: true,
+        department: true,
         phoneNumber: true,
         country: true,
-        timezone: true,
-        dateFormat: true,
         createdAt: true,
         updatedAt: true
       }
@@ -703,6 +709,21 @@ async function updateUser({ db, userId, payload }) {
   if (payload.lastName !== undefined) {
     patch.lastName = payload.lastName;
   }
+  if (payload.title !== undefined) {
+    patch.title = payload.title;
+  }
+  if (payload.department !== undefined) {
+    if (payload.department !== null && payload.department !== '' && !ALLOWED_DEPARTMENTS.has(payload.department)) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid department value.');
+    }
+    patch.department = payload.department;
+  }
+  if (payload.phoneNumber !== undefined) {
+    patch.phoneNumber = payload.phoneNumber;
+  }
+  if (payload.country !== undefined) {
+    patch.country = payload.country;
+  }
   if (payload.isActive !== undefined) {
     patch.isActive = Boolean(payload.isActive);
   }
@@ -744,17 +765,17 @@ async function updateOwnProfile({ db, userId, payload }) {
   if (payload.title !== undefined) {
     patch.title = payload.title;
   }
+  if (payload.department !== undefined) {
+    if (payload.department !== null && payload.department !== '' && !ALLOWED_DEPARTMENTS.has(payload.department)) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid department value.');
+    }
+    patch.department = payload.department;
+  }
   if (payload.phoneNumber !== undefined) {
     patch.phoneNumber = payload.phoneNumber;
   }
   if (payload.country !== undefined) {
     patch.country = payload.country;
-  }
-  if (payload.timezone !== undefined) {
-    patch.timezone = payload.timezone;
-  }
-  if (payload.dateFormat !== undefined) {
-    patch.dateFormat = payload.dateFormat;
   }
   if (payload.filePath) {
     const normalizedPath = String(payload.filePath).replace(/\\/g, '/');
@@ -928,10 +949,9 @@ async function updateAvatar({ db, userId, filePath }) {
         lastName: true,
         avatarUrl: true,
         title: true,
+        department: true,
         phoneNumber: true,
         country: true,
-        timezone: true,
-        dateFormat: true,
         createdAt: true,
         updatedAt: true
       }

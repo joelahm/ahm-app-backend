@@ -5,6 +5,15 @@ const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../..
 const { generateSessionId, generateTokenFamily, hashRefreshToken } = require('../../lib/refreshToken');
 const { hashInviteToken } = require('../../lib/inviteToken');
 
+const ALLOWED_DEPARTMENTS = new Set([
+  'CSM',
+  'SEO',
+  'Designer',
+  'Web Development',
+  'Operations',
+  'Management'
+]);
+
 function mapUser(user) {
   if (!user) return null;
   return {
@@ -17,6 +26,7 @@ function mapUser(user) {
     last_name: user.lastName,
     avatar_url: user.avatarUrl ?? null,
     title: user.title ?? null,
+    department: user.department ?? null,
     phone_number: user.phoneNumber ?? null,
     country: user.country ?? null,
     timezone: user.timezone ?? null,
@@ -67,6 +77,7 @@ async function getActiveUserById(db, userId) {
       lastName: true,
       avatarUrl: true,
       title: true,
+      department: true,
       phoneNumber: true,
       country: true,
       timezone: true,
@@ -468,11 +479,10 @@ async function registerInvitedUser({
   firstName,
   lastName,
   title,
+  department,
   phoneNumber,
   email,
   country,
-  timezone,
-  dateFormat,
   password,
   confirmPassword,
   ipAddress,
@@ -485,11 +495,10 @@ async function registerInvitedUser({
     || !firstName
     || !lastName
     || !title
+    || !department
     || !phoneNumber
     || !normalizedEmail
     || !country
-    || !timezone
-    || !dateFormat
     || !password
     || !confirmPassword
   ) {
@@ -502,6 +511,10 @@ async function registerInvitedUser({
 
   if (String(password).length < 10) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Password must be at least 10 characters.');
+  }
+
+  if (!ALLOWED_DEPARTMENTS.has(String(department).trim())) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid department value.');
   }
 
   const tokenHash = hashInviteToken(token);
@@ -527,9 +540,9 @@ async function registerInvitedUser({
 
     await tx.$executeRaw`
       INSERT INTO users
-      (email, password_hash, role_code, first_name, last_name, title, phone_number, country, timezone, date_format, status, is_active, created_at, updated_at)
+      (email, password_hash, role_code, first_name, last_name, title, department, phone_number, country, status, is_active, created_at, updated_at)
       VALUES
-      (${normalizedEmail}, ${passwordHash}, ${invite.role}, ${String(firstName).trim()}, ${String(lastName).trim()}, ${String(title).trim()}, ${String(phoneNumber).trim()}, ${String(country).trim()}, ${String(timezone).trim()}, ${String(dateFormat).trim()}, 'ACTIVE', 1, NOW(), NOW())
+      (${normalizedEmail}, ${passwordHash}, ${invite.role}, ${String(firstName).trim()}, ${String(lastName).trim()}, ${String(title).trim()}, ${String(department).trim()}, ${String(phoneNumber).trim()}, ${String(country).trim()}, 'ACTIVE', 1, NOW(), NOW())
     `;
 
     createdUser = await tx.user.findUnique({

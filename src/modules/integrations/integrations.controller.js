@@ -93,7 +93,7 @@ async function listDataForSeoKeywordCountries(req, res, next) {
     const data = await integrationsService.listDataForSeoKeywordCountries({
       db: req.app.locals.db,
       env: req.app.locals.env,
-      requestedBy: req.auth.userId,
+      requestedBy: req.auth?.userId ?? null,
     });
     res.status(200).json(data);
   } catch (err) {

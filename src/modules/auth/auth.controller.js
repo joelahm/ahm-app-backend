@@ -93,10 +93,9 @@ async function me(req, res, next) {
         lastName: user.last_name,
         avatarUrl: user.avatar_url,
         title: user.title,
+        department: user.department,
         phoneNumber: user.phone_number,
         country: user.country,
-        timezone: user.timezone,
-        dateFormat: user.date_format,
         createdAt: user.created_at,
         updatedAt: user.updated_at
       }
@@ -169,11 +168,10 @@ async function registerInvitedUser(req, res, next) {
       firstName,
       lastName,
       title,
+      department,
       phoneNumber,
       email,
       country,
-      timezone,
-      dateFormat,
       password,
       confirmPassword
     } = req.body || {};
@@ -185,11 +183,10 @@ async function registerInvitedUser(req, res, next) {
       firstName,
       lastName,
       title,
+      department,
       phoneNumber,
       email,
       country,
-      timezone,
-      dateFormat,
       password,
       confirmPassword,
       ipAddress: readIp(req),

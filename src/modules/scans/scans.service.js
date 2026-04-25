@@ -8,6 +8,7 @@ const ALLOWED_FREQUENCIES = new Set(['DAILY', 'WEEKLY', 'BIWEEKLY', 'MONTHLY']);
 const ALLOWED_SCAN_STATUSES = new Set(['ACTIVE', 'PAUSED', 'DELETED']);
 const ALLOWED_SCAN_SCOPES = new Set(['CLIENT', 'QUICK']);
 const LOCAL_RANKINGS_SAVED_KEYWORDS_PREFIX = 'local_rankings_saved_keywords';
+const ALLOWED_SCAN_TIMEZONES = new Set(['Europe/London']);
 
 function parsePositiveInteger(value, fieldName) {
   const number = Number(value);
@@ -125,8 +126,58 @@ function parseDate(value, fieldName) {
   return normalized;
 }
 
-function parseDateTime(startDate, startTime) {
-  const timestamp = new Date(`${startDate}T${startTime}:00`);
+function parseOptionalText(value) {
+  const normalized = String(value || '').trim();
+  return normalized || null;
+}
+
+function parseTimezone(value) {
+  const normalized = String(value || '').trim() || 'Europe/London';
+  if (!ALLOWED_SCAN_TIMEZONES.has(normalized)) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'timezone must be Europe/London.');
+  }
+  return normalized;
+}
+
+function getTimeZoneOffsetMinutes(date, timeZone) {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23'
+  });
+  const values = formatter.formatToParts(date).reduce((accumulator, part) => {
+    if (part.type !== 'literal') {
+      accumulator[part.type] = part.value;
+    }
+    return accumulator;
+  }, {});
+  const zonedUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second)
+  );
+
+  return (zonedUtc - date.getTime()) / 60000;
+}
+
+function parseDateTime(startDate, startTime, timeZone = 'Europe/London') {
+  const [year, month, day] = startDate.split('-').map(Number);
+  const [hour, minute] = startTime.split(':').map(Number);
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let timestamp = new Date(
+    utcGuess - getTimeZoneOffsetMinutes(new Date(utcGuess), timeZone) * 60000
+  );
+  timestamp = new Date(
+    utcGuess - getTimeZoneOffsetMinutes(timestamp, timeZone) * 60000
+  );
   if (Number.isNaN(timestamp.getTime())) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Invalid start date/time.');
   }
@@ -312,6 +363,8 @@ function mapScan(scan) {
     remainingRuns: scan.remainingRuns == null ? null : Number(scan.remainingRuns),
     startAt: scan.startAt,
     nextRunAt: scan.nextRunAt,
+    timezone: scan.timezone || null,
+    notes: scan.notes || null,
     estimatedRequests: scan.estimatedRequests,
     status: scan.status,
     createdBy: scan.createdBy ? Number(scan.createdBy) : null,
@@ -564,7 +617,8 @@ function buildCreatePayload(payload) {
     payload.frequency !== undefined ||
     payload.repeatTime !== undefined ||
     payload.startDate !== undefined ||
-    payload.startTime !== undefined;
+    payload.startTime !== undefined ||
+    payload.timezone !== undefined;
   const recurrenceEnabled = parseBoolean(
     payload.recurrenceEnabled,
     hasRecurrenceFields
@@ -578,6 +632,8 @@ function buildCreatePayload(payload) {
   let remainingRuns = null;
   let startAt = null;
   let nextRunAt = null;
+  let timezone = null;
+  const notes = parseOptionalText(payload.notes);
 
   if (effectiveRecurrenceEnabled) {
     frequency = parseFrequency(payload.frequency);
@@ -585,7 +641,8 @@ function buildCreatePayload(payload) {
     remainingRuns = repeatTime;
     const startDate = parseDate(payload.startDate, 'startDate');
     const startTime = parseTime(payload.startTime, 'startTime');
-    startAt = parseDateTime(startDate, startTime);
+    timezone = parseTimezone(payload.timezone);
+    startAt = parseDateTime(startDate, startTime, timezone);
     nextRunAt = computeInitialRecurringNextRunAt({
       startAt,
       frequency,
@@ -612,6 +669,8 @@ function buildCreatePayload(payload) {
     remainingRuns,
     startAt,
     nextRunAt,
+    timezone,
+    notes,
     status,
     estimatedRequests
   };
@@ -642,6 +701,8 @@ async function createScan({ db, actorUserId, payload }) {
       remainingRuns: parsed.remainingRuns,
       startAt: parsed.startAt,
       nextRunAt: parsed.nextRunAt,
+      timezone: parsed.timezone,
+      notes: parsed.notes,
       estimatedRequests: parsed.coverage.length,
       status: parsed.status,
       createdBy: BigInt(actorUserId)
