@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const { AppError } = require('../../lib/errors');
+const anthropicContentService = require('../ai-content/anthropic.service');
 
 const DATAFORSEO_ENDPOINTS = {
   rankings: '/v3/serp/google/local_finder/live/advanced',
@@ -720,7 +721,11 @@ function requireManusConfig(env) {
 
 function normalizeAiProvider(value) {
   const normalized = String(value || '').trim().toUpperCase();
-  return normalized === 'OPENAI' ? 'OPENAI' : 'MANUS';
+  if (normalized === 'OPENAI' || normalized === 'ANTHROPIC') {
+    return normalized;
+  }
+
+  return 'MANUS';
 }
 
 function extractManusAssistantText(payload) {
@@ -1304,12 +1309,21 @@ async function fetchDataForSeoKeywordOverview({ db, env, requestedBy, payload })
   });
 
   if (!success) {
-    throw new AppError(502, 'UPSTREAM_API_ERROR', 'DataForSEO keyword overview request failed.', {
+    const isPaymentRequired = response.status === 402;
+
+    throw new AppError(
+      isPaymentRequired ? 402 : 502,
+      isPaymentRequired ? 'UPSTREAM_PAYMENT_REQUIRED' : 'UPSTREAM_API_ERROR',
+      isPaymentRequired
+        ? 'DataForSEO keyword overview request failed because the account has insufficient credits or billing access.'
+        : 'DataForSEO keyword overview request failed.',
+      {
       provider: 'DATAFORSEO',
       operation: 'KEYWORD_OVERVIEW',
       logId: Number(log.id),
       upstreamStatus: response.status
-    });
+      }
+    );
   }
 
   return {
@@ -1697,6 +1711,88 @@ async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt
   };
 }
 
+async function fetchAnthropicGeneratedText({ db, env, requestedBy, clientId, prompt, maxCharacters = null, model = null, auditContext = null }) {
+  const operation = 'GENERATE_TEXT';
+  const endpoint = `${String(env.integrations.anthropic?.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')}/v1/messages`;
+  const resolvedModel = optionalString(model) || env.integrations.anthropic?.model || null;
+  const requestPayload = {
+    maxOutputTokens: Number(maxCharacters || env.integrations.anthropic?.maxOutputTokens || 4096),
+    model: resolvedModel,
+    prompt,
+  };
+
+  try {
+    const generated = await anthropicContentService.generateMedicalWebsiteContent({
+      env,
+      maxOutputTokens: requestPayload.maxOutputTokens,
+      model: resolvedModel,
+      prompt,
+    });
+
+    const log = await persistManusApiLog({
+      db,
+      operation: `ANTHROPIC_${operation}`,
+      clientId,
+      requestedBy,
+      endpoint,
+      requestMethod: 'POST',
+      requestPayload: {
+        ...requestPayload,
+        auditContext,
+        prompt: '[redacted]',
+      },
+      responseStatusCode: 200,
+      responsePayload: {
+        model: generated.model,
+        stopReason: generated.stopReason,
+        usage: generated.usage,
+      },
+      isSuccess: true,
+      externalTaskId: null,
+      errorMessage: null,
+    });
+
+    return {
+      logId: Number(log.id),
+      operation,
+      provider: 'ANTHROPIC',
+      taskId: null,
+      text: generated.text,
+      usage: generated.usage,
+    };
+  } catch (error) {
+    const statusCode = error instanceof AppError ? error.statusCode : 502;
+    const code = error instanceof AppError ? error.code : 'UPSTREAM_API_ERROR';
+    const message = error instanceof Error ? error.message : 'Anthropic request failed.';
+    const details = error instanceof AppError ? error.details : null;
+
+    const log = await persistManusApiLog({
+      db,
+      operation: `ANTHROPIC_${operation}`,
+      clientId,
+      requestedBy,
+      endpoint,
+      requestMethod: 'POST',
+      requestPayload: {
+        ...requestPayload,
+        auditContext,
+        prompt: '[redacted]',
+      },
+      responseStatusCode: details?.upstreamStatus ?? null,
+      responsePayload: details,
+      isSuccess: false,
+      externalTaskId: null,
+      errorMessage: message,
+    });
+
+    throw new AppError(statusCode, code, message, {
+      ...(details || {}),
+      logId: Number(log.id),
+      provider: 'ANTHROPIC',
+    });
+  }
+}
+
 async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
   const clientId = parseOptionalId(payload.clientId, 'clientId');
   await assertContextExists(db, clientId);
@@ -1704,6 +1800,7 @@ async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
   const prompt = requireString(payload.prompt, 'prompt');
   const provider = normalizeAiProvider(payload.provider || env.integrations.aiTitleProvider);
   const maxCharacters = payload.maxCharacters ? Number(payload.maxCharacters) : null;
+  const model = optionalString(payload.model) || null;
   const auditContext =
     payload.auditContext && typeof payload.auditContext === 'object' && !Array.isArray(payload.auditContext)
       ? payload.auditContext
@@ -1711,6 +1808,19 @@ async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
 
   if (provider === 'OPENAI') {
     return fetchOpenAiGeneratedText({
+      db,
+      env,
+      requestedBy,
+      clientId,
+      prompt,
+      maxCharacters,
+      model,
+      auditContext,
+    });
+  }
+
+  if (provider === 'ANTHROPIC') {
+    return fetchAnthropicGeneratedText({
       db,
       env,
       requestedBy,

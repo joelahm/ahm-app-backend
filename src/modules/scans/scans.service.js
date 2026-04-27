@@ -88,7 +88,9 @@ function parseCoveragePoints(value) {
     return {
       label: String(point?.label || '').trim() || null,
       latitude,
-      longitude
+      longitude,
+      isOffshore: point?.isOffshore === true || point?.isOffshore === 'true',
+      offshoreReason: String(point?.offshoreReason || '').trim() || null
     };
   });
 }
@@ -474,6 +476,28 @@ function extractCandidatesFromExternalApiLog(responsePayload) {
       const rankB = b.rankAbsolute ?? Number.MAX_SAFE_INTEGER;
       return rankA - rankB;
     });
+}
+
+function normalizeCompetitorKeyPart(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function normalizeCompetitorDomain(value) {
+  return normalizeCompetitorKeyPart(value)
+    .replace(/^https?:\/\//, '')
+    .replace(/^www\./, '')
+    .split('/')[0]
+    .split('?')[0];
+}
+
+function buildCompetitorNameAddressKey(name, address) {
+  const normalizedName = normalizeCompetitorKeyPart(name);
+
+  if (!normalizedName) {
+    return null;
+  }
+
+  return `${normalizedName}::${normalizeCompetitorKeyPart(address)}`;
 }
 
 function emitScanEvent(io, scanId, runId, event, payload) {
@@ -1015,6 +1039,40 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
     for (const keyword of keywords) {
       for (const point of coveragePoints) {
         try {
+          if (point.isOffshore) {
+            resultRows.push({
+              scanRunId: run.id,
+              keyword,
+              coordinateLabel: point.label || null,
+              latitude: point.latitude,
+              longitude: point.longitude,
+              matchedItem: {
+                reason: 'OFFSHORE_POINT',
+                message: point.offshoreReason || 'Point is offshore and was not scanned.'
+              }
+            });
+            completedRequests += 1;
+
+            await db.scanRun.update({
+              where: { id: run.id },
+              data: {
+                completedRequests,
+                failedRequests
+              }
+            });
+
+            emitScanEvent(io, Number(scan.id), Number(run.id), 'scan:run-progress', {
+              scanId: Number(scan.id),
+              runId: Number(run.id),
+              totalRequests,
+              completedRequests,
+              failedRequests,
+              processedRequests: completedRequests + failedRequests
+            });
+
+            continue;
+          }
+
           const quickContext = scan.quickScanContext && typeof scan.quickScanContext === 'object'
             ? scan.quickScanContext
             : null;
@@ -1351,6 +1409,115 @@ async function buildRunKeywordDetails({ db, run }) {
       competitorsByKey.set(key, existing);
     }
   }
+  const rankedCoordinates = enrichedResults.filter((result) => result.rankAbsolute !== null);
+  const totalRank = rankedCoordinates.reduce((sum, result) => sum + result.rankAbsolute, 0);
+  const averageRank = rankedCoordinates.length
+    ? Number((totalRank / rankedCoordinates.length).toFixed(2))
+    : null;
+  const bestRank = rankedCoordinates.length
+    ? Math.min(...rankedCoordinates.map((result) => result.rankAbsolute))
+    : null;
+  const worstRank = rankedCoordinates.length
+    ? Math.max(...rankedCoordinates.map((result) => result.rankAbsolute))
+    : null;
+  const targetPlaceIds = new Set(
+    [
+      run.scan.gbpProfile.placeId,
+      ...rankedCoordinates.map((result) => result.matchedPlaceId)
+    ]
+      .map(normalizeCompetitorKeyPart)
+      .filter(Boolean)
+  );
+  const targetDomains = new Set(
+    [
+      run.scan.client.website,
+      run.scan.gbpProfile.website,
+      ...rankedCoordinates.map((result) => result.matchedDomain)
+    ]
+      .map(normalizeCompetitorDomain)
+      .filter(Boolean)
+  );
+  const targetBusinessNames = new Set(
+    [
+      run.scan.gbpProfile.title,
+      run.scan.client.businessName,
+      ...rankedCoordinates.map((result) => result.matchedTitle)
+    ]
+      .map(normalizeCompetitorKeyPart)
+      .filter(Boolean)
+  );
+  const targetNameAddressKeys = new Set(
+    [
+      buildCompetitorNameAddressKey(run.scan.gbpProfile.title, run.scan.gbpProfile.address),
+      ...rankedCoordinates.map((result) => buildCompetitorNameAddressKey(result.matchedTitle, result.matchedAddress))
+    ].filter(Boolean)
+  );
+  const targetCompetitorKey =
+    Array.from(targetPlaceIds)[0] ||
+    Array.from(targetDomains)[0] ||
+    Array.from(targetNameAddressKeys)[0] ||
+    `scan-target:${run.scan.gbpProfile.id}`;
+  const isTargetCompetitorEntry = ([key, entry]) => {
+    const normalizedKey = normalizeCompetitorKeyPart(key);
+    const normalizedDomain = normalizeCompetitorDomain(entry.domain || key);
+    const normalizedBusinessName = normalizeCompetitorKeyPart(entry.businessName);
+    const nameAddressKey = buildCompetitorNameAddressKey(entry.businessName, entry.address);
+
+    return (
+      targetPlaceIds.has(normalizedKey) ||
+      targetDomains.has(normalizedDomain) ||
+      targetNameAddressKeys.has(normalizedKey) ||
+      (nameAddressKey && targetNameAddressKeys.has(nameAddressKey)) ||
+      (
+        targetBusinessNames.has(normalizedBusinessName) &&
+        (!normalizedDomain || targetDomains.size === 0 || targetDomains.has(normalizedDomain))
+      )
+    );
+  };
+  const matchedCompetitorEntries = Array.from(competitorsByKey.entries()).filter(isTargetCompetitorEntry);
+  const existingTargetCompetitor = matchedCompetitorEntries[0]
+    ? matchedCompetitorEntries[0][1]
+    : null;
+  const targetRankedCoordinates = rankedCoordinates.length ? rankedCoordinates : [];
+
+  if (targetRankedCoordinates.length) {
+    matchedCompetitorEntries.forEach(([key]) => {
+      competitorsByKey.delete(key);
+    });
+
+    competitorsByKey.set(targetCompetitorKey, {
+      key: targetCompetitorKey,
+      businessName:
+        rankedCoordinates.find((result) => result.matchedTitle)?.matchedTitle ||
+        existingTargetCompetitor?.businessName ||
+        run.scan.gbpProfile.title ||
+        run.scan.client.businessName,
+      address:
+        rankedCoordinates.find((result) => result.matchedAddress)?.matchedAddress ||
+        existingTargetCompetitor?.address ||
+        run.scan.gbpProfile.address ||
+        null,
+      domain:
+        rankedCoordinates.find((result) => result.matchedDomain)?.matchedDomain ||
+        existingTargetCompetitor?.domain ||
+        run.scan.gbpProfile.website ||
+        run.scan.client.website ||
+        null,
+      primaryCategory: existingTargetCompetitor?.primaryCategory ?? null,
+      secondaryCategory: existingTargetCompetitor?.secondaryCategory ?? null,
+      photos: existingTargetCompetitor?.photos ?? null,
+      rating:
+        rankedCoordinates.find((result) => result.matchedRating !== null)?.matchedRating ??
+        existingTargetCompetitor?.rating ??
+        null,
+      reviewsCount: existingTargetCompetitor?.reviewsCount ?? null,
+      bestRank,
+      rankTotal: totalRank,
+      rankCount: targetRankedCoordinates.length,
+      isClientGbp: true
+    });
+  }
+
   const competitors = Array.from(competitorsByKey.values())
     .map((entry) => ({
       key: entry.key,
@@ -1374,7 +1541,8 @@ async function buildRunKeywordDetails({ db, run }) {
       bestRank: entry.bestRank,
       averageRank: entry.rankCount
         ? Number((entry.rankTotal / entry.rankCount).toFixed(2))
-        : null
+        : null,
+      isClientGbp: Boolean(entry.isClientGbp)
     }))
     .sort((a, b) => {
       const rankA = a.averageRank ?? Number.MAX_SAFE_INTEGER;
@@ -1385,17 +1553,6 @@ async function buildRunKeywordDetails({ db, run }) {
 
       return a.businessName.localeCompare(b.businessName);
     });
-  const rankedCoordinates = enrichedResults.filter((result) => result.rankAbsolute !== null);
-  const totalRank = rankedCoordinates.reduce((sum, result) => sum + result.rankAbsolute, 0);
-  const averageRank = rankedCoordinates.length
-    ? Number((totalRank / rankedCoordinates.length).toFixed(2))
-    : null;
-  const bestRank = rankedCoordinates.length
-    ? Math.min(...rankedCoordinates.map((result) => result.rankAbsolute))
-    : null;
-  const worstRank = rankedCoordinates.length
-    ? Math.max(...rankedCoordinates.map((result) => result.rankAbsolute))
-    : null;
 
   return {
     scanId: Number(run.scanId),
@@ -1839,6 +1996,7 @@ async function listClientLocalRankings({ db, clientId, page = 1, limit = 20 }) {
     },
     select: {
       id: true,
+      coverageUnit: true,
       createdAt: true,
       frequency: true,
       status: true,
@@ -1953,6 +2111,7 @@ async function listClientLocalRankings({ db, clientId, page = 1, limit = 20 }) {
         keyword,
         dateAdded: scan.createdAt,
         dateOfScan: latestRun.finishedAt || latestRun.startedAt,
+        coverageUnit: scan.coverageUnit,
         previousScan: previous?.averageRank ?? null,
         latestScan: summary.averageRank ?? null,
         nextSchedule: scan.nextRunAt,

@@ -129,6 +129,12 @@ function readEnv() {
         apiKey: process.env.OPENAI_API_KEY || null,
         model: process.env.OPENAI_MODEL || 'gpt-5.2',
         maxOutputTokens: Number(process.env.OPENAI_MAX_OUTPUT_TOKENS || 120)
+      },
+      anthropic: {
+        baseUrl: process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+        apiKey: process.env.ANTHROPIC_API_KEY || null,
+        model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
+        maxOutputTokens: readPositiveInteger(process.env.ANTHROPIC_MAX_OUTPUT_TOKENS, 4096)
       }
     },
     scans: {
