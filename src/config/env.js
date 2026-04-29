@@ -93,6 +93,20 @@ function readEnv() {
       expiresInHours: Number(process.env.INVITE_EXPIRES_HOURS || 72),
       baseUrl: process.env.INVITE_BASE_URL || process.env.APP_BASE_URL || null
     },
+    websiteContentReview: {
+      linkExpiresDays: readPositiveInteger(
+        process.env.WEBSITE_CONTENT_REVIEW_LINK_EXPIRES_DAYS,
+        14
+      ),
+      otpExpiresMinutes: readPositiveInteger(
+        process.env.WEBSITE_CONTENT_REVIEW_OTP_EXPIRES_MINUTES,
+        10
+      ),
+      sessionExpiresHours: readPositiveInteger(
+        process.env.WEBSITE_CONTENT_REVIEW_SESSION_EXPIRES_HOURS,
+        24
+      )
+    },
     email: {
       authMode: readSmtpAuthMode(),
       host: process.env.SMTP_HOST || null,
@@ -135,6 +149,9 @@ function readEnv() {
         apiKey: process.env.ANTHROPIC_API_KEY || null,
         model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514',
         maxOutputTokens: readPositiveInteger(process.env.ANTHROPIC_MAX_OUTPUT_TOKENS, 4096)
+      },
+      discord: {
+        botToken: process.env.DISCORD_BOT_TOKEN || null
       }
     },
     scans: {

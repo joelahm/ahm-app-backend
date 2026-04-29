@@ -215,6 +215,7 @@ model Client {
   nearbyAreasServed             String?   @map("nearby_areas_served") @db.VarChar(500)
   practiceHours                 Json?     @map("practice_hours")
   gbpLink                       String?   @map("gbp_link") @db.VarChar(255)
+  discordChannel                String?   @map("discord_channel") @db.VarChar(255)
   facebook                      String?   @db.VarChar(255)
   instagram                     String?   @db.VarChar(255)
   linkedin                      String?   @db.VarChar(255)
@@ -468,6 +469,98 @@ model KeywordContentList {
   @@index([createdBy], map: "idx_keyword_content_lists_created_by")
   @@index([createdAt], map: "idx_keyword_content_lists_created_at")
   @@map("keyword_content_lists")
+}
+
+model WebsiteContentReviewLink {
+  id                   BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId             BigInt    @map("client_id") @db.UnsignedBigInt
+  keywordContentListId BigInt    @map("keyword_content_list_id") @db.UnsignedBigInt
+  keywordId            String    @map("keyword_id") @db.VarChar(120)
+  tokenHash            String    @unique(map: "uq_website_content_review_links_token_hash") @map("token_hash") @db.Char(64)
+  tokenCiphertext      String    @map("token_ciphertext") @db.Text
+  enabled              Boolean   @default(true)
+  expiresAt            DateTime  @map("expires_at")
+  disabledAt           DateTime? @map("disabled_at")
+  createdBy            BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@index([clientId], map: "idx_wcr_links_client_id")
+  @@index([keywordContentListId, keywordId], map: "idx_wcr_links_keyword")
+  @@index([expiresAt], map: "idx_wcr_links_expires_at")
+  @@map("website_content_review_links")
+}
+
+model WebsiteContentReviewOtp {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  reviewLinkId BigInt    @map("review_link_id") @db.UnsignedBigInt
+  email        String    @db.VarChar(255)
+  fullName     String    @map("full_name") @db.VarChar(255)
+  otpHash      String    @map("otp_hash") @db.Char(64)
+  expiresAt    DateTime  @map("expires_at")
+  usedAt       DateTime? @map("used_at")
+  attemptCount Int       @default(0) @map("attempt_count") @db.UnsignedInt
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([reviewLinkId, email], map: "idx_wcr_otps_link_email")
+  @@index([expiresAt], map: "idx_wcr_otps_expires_at")
+  @@map("website_content_review_otps")
+}
+
+model WebsiteContentVersion {
+  id                   BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId             BigInt   @map("client_id") @db.UnsignedBigInt
+  keywordContentListId BigInt   @map("keyword_content_list_id") @db.UnsignedBigInt
+  keywordId            String   @map("keyword_id") @db.VarChar(120)
+  source               String   @db.VarChar(64)
+  snapshotJson         Json     @map("snapshot_json")
+  createdByType        String   @map("created_by_type") @db.VarChar(32)
+  createdByUserId      BigInt?  @map("created_by_user_id") @db.UnsignedBigInt
+  createdByName        String?  @map("created_by_name") @db.VarChar(255)
+  createdByEmail       String?  @map("created_by_email") @db.VarChar(255)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([clientId], map: "idx_wcr_versions_client_id")
+  @@index([keywordContentListId, keywordId, createdAt], map: "idx_wcr_versions_keyword")
+  @@map("website_content_versions")
+}
+
+model WebsiteContentEditActivity {
+  id                   BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId             BigInt   @map("client_id") @db.UnsignedBigInt
+  keywordContentListId BigInt   @map("keyword_content_list_id") @db.UnsignedBigInt
+  keywordId            String   @map("keyword_id") @db.VarChar(120)
+  actorType            String   @map("actor_type") @db.VarChar(32)
+  actorUserId          BigInt?  @map("actor_user_id") @db.UnsignedBigInt
+  actorName            String?  @map("actor_name") @db.VarChar(255)
+  actorEmail           String?  @map("actor_email") @db.VarChar(255)
+  action               String   @db.VarChar(64)
+  fieldName            String?  @map("field_name") @db.VarChar(120)
+  oldValue             String?  @map("old_value") @db.MediumText
+  newValue             String?  @map("new_value") @db.MediumText
+  metadataJson         Json?    @map("metadata_json")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([clientId], map: "idx_wcr_activity_client_id")
+  @@index([keywordContentListId, keywordId, createdAt], map: "idx_wcr_activity_keyword")
+  @@map("website_content_edit_activity")
+}
+
+model WebsiteContentReviewComment {
+  id                   BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  reviewLinkId         BigInt?  @map("review_link_id") @db.UnsignedBigInt
+  clientId             BigInt   @map("client_id") @db.UnsignedBigInt
+  keywordContentListId BigInt   @map("keyword_content_list_id") @db.UnsignedBigInt
+  keywordId            String   @map("keyword_id") @db.VarChar(120)
+  comment              String   @db.Text
+  authorName           String   @map("author_name") @db.VarChar(255)
+  authorEmail          String?  @map("author_email") @db.VarChar(255)
+  source               String   @db.VarChar(32)
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  @@index([reviewLinkId], map: "idx_wcr_comments_review_link_id")
+  @@index([keywordContentListId, keywordId, createdAt], map: "idx_wcr_comments_keyword")
+  @@map("website_content_review_comments")
 }
 
 

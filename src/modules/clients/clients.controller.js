@@ -366,6 +366,22 @@ async function patchClient(req, res, next) {
   }
 }
 
+async function testClientDiscordConnection(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const result = await clientsService.testClientDiscordConnection({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      clientId,
+      payload: req.body || {}
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function createClientProject(req, res, next) {
   try {
     const clientId = readClientId(req);
@@ -534,6 +550,7 @@ module.exports = {
   listClientCitations,
   createClient,
   patchClient,
+  testClientDiscordConnection,
   createClientCitation,
   patchClientCitation,
   deleteClientCitation,

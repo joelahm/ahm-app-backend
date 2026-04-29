@@ -161,6 +161,7 @@ function mapClient(client) {
     nearbyAreasServed: client.nearbyAreasServed ?? null,
     practiceHours: toJsonArray(client.practiceHours),
     gbpLink: client.gbpLink ?? null,
+    discordChannel: client.discordChannel ?? null,
     facebook: client.facebook ?? null,
     instagram: client.instagram ?? null,
     linkedin: client.linkedin ?? null,
@@ -588,6 +589,41 @@ function stringifyJsonList(value) {
   return String(value || '').trim();
 }
 
+function stringifyPracticeHours(value) {
+  if (!Array.isArray(value)) {
+    return '';
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return '';
+      }
+
+      const day = String(item.day || '').trim();
+      if (!day) {
+        return '';
+      }
+
+      if (!item.enabled) {
+        return `${day}: Closed`;
+      }
+
+      const start = [item.startTime, item.startMeridiem]
+        .map((part) => String(part || '').trim())
+        .filter(Boolean)
+        .join(' ');
+      const end = [item.endTime, item.endMeridiem]
+        .map((part) => String(part || '').trim())
+        .filter(Boolean)
+        .join(' ');
+
+      return start && end ? `${day}: ${start} - ${end}` : `${day}: Open`;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
 function normalizeTokenMap(values) {
   return Object.fromEntries(Object.entries(values).map(([key, value]) => [key.toLowerCase(), String(value ?? '')]));
 }
@@ -634,15 +670,43 @@ function buildGbpPostingPromptValues({ client, item, language, languageCode, pos
     business_phone: client.businessPhone || '',
     city_state: client.cityState || '',
     client_business_name: client.businessName || '',
+    client_business_email: client.practiceEmail || '',
+    client_business_phone: client.businessPhone || '',
+    client_building_name: client.buildingName || '',
     client_city_state: client.cityState || '',
+    client_conditions_treated: stringifyJsonList(client.conditionsTreated),
     client_country: client.country || '',
+    client_credentials: client.credentials || '',
+    client_discord_channel: client.discordChannel || '',
+    client_facebook: client.facebook || '',
+    client_gbp_link: client.gbpLink || '',
+    client_gmc_registration_number: client.gmcRegistrationNumber || '',
+    client_instagram: client.instagram || '',
+    client_linkedin: client.linkedin || '',
+    client_major_accomplishments: client.majorAccomplishments || '',
     client_name: client.clientName || '',
+    client_nearby_areas_served: client.nearbyAreasServed || '',
     client_niche: client.niche || '',
+    client_personal_email: client.personalEmail || '',
+    client_personal_phone: client.personalPhone || '',
+    client_post_code: client.postCode || '',
+    client_practice_hours: stringifyPracticeHours(client.practiceHours),
     client_practice_introduction: client.practiceIntroduction || '',
+    client_practice_structure: client.practiceStructure || '',
     client_profession: client.profession || '',
+    client_region: client.region || '',
     client_special_interests: stringifyJsonList(client.specialInterests),
+    client_street_address: client.streetAddress || '',
+    client_sub_specialty: stringifyJsonList(client.subSpecialties),
+    client_sub_specialties: stringifyJsonList(client.subSpecialties),
+    client_target_area: client.visibleArea || '',
+    client_title: client.profession || '',
+    client_top_medical_specialties: stringifyJsonList(client.topMedicalSpecialties),
     client_top_treatments: stringifyJsonList(client.topTreatments),
+    client_treatment_and_services: stringifyJsonList(client.treatmentAndServices),
     client_type_of_practice: client.typeOfPractice || '',
+    client_unique_to_competitors: client.uniqueToCompetitors || '',
+    client_unit_number: client.unitNumber || '',
     client_visible_area: client.visibleArea || '',
     client_website: client.website || '',
     content_type: contentType,
@@ -890,6 +954,7 @@ function buildClientPatch({ payload, files, existingClient }) {
     nearbyAreasServed: parseOptionalString(payload.nearbyAreasServed),
     practiceHours: parsePracticeHours(payload),
     gbpLink: parseOptionalUrl(payload.gbpLink, 'gbpLink'),
+    discordChannel: parseOptionalString(payload.discordChannel),
     facebook: parseOptionalUrl(payload.facebook, 'facebook'),
     instagram: parseOptionalUrl(payload.instagram, 'instagram'),
     linkedin: parseOptionalUrl(payload.linkedin, 'linkedin'),
@@ -1778,6 +1843,83 @@ async function updateClient({ db, clientId, payload, files }) {
   return mapClient(updated);
 }
 
+async function testClientDiscordConnection({ db, env, clientId, payload }) {
+  const client = await db.client.findUnique({
+    where: { id: BigInt(clientId) },
+    select: {
+      businessName: true,
+      clientName: true,
+      discordChannel: true
+    }
+  });
+
+  if (!client) {
+    throw new AppError(404, 'NOT_FOUND', 'Client not found.');
+  }
+
+  const botToken = env?.integrations?.discord?.botToken;
+  if (!botToken) {
+    throw new AppError(
+      500,
+      'CONFIGURATION_ERROR',
+      'Discord bot token is not configured.'
+    );
+  }
+
+  const channelId = parseOptionalString(payload.discordChannel) || client.discordChannel;
+  if (!channelId) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'Discord channel is required before testing the connection.'
+    );
+  }
+
+  if (!/^\d{15,25}$/.test(channelId)) {
+    throw new AppError(
+      400,
+      'VALIDATION_ERROR',
+      'Discord channel must be a valid channel ID.'
+    );
+  }
+
+  const clientLabel = client.clientName || client.businessName || `Client ${clientId}`;
+  const response = await fetch(`https://discord.com/api/v10/channels/${channelId}`, {
+    method: 'GET',
+    headers: {
+      Authorization: `Bot ${botToken}`
+    }
+  });
+
+  if (!response.ok) {
+    let details = null;
+    try {
+      details = await response.json();
+    } catch {
+      details = await response.text().catch(() => null);
+    }
+
+    throw new AppError(
+      502,
+      'UPSTREAM_API_ERROR',
+      'Discord channel access test failed.',
+      {
+        provider: 'DISCORD',
+        status: response.status,
+        details
+      }
+    );
+  }
+
+  const channel = await response.json();
+
+  return {
+    channelId,
+    channelName: channel?.name ?? null,
+    reachable: true
+  };
+}
+
 async function createClientProject({ db, actorUserId, clientId, payload }) {
   const projectName = String(payload.project || '').trim();
   const phase = String(payload.phase || '').trim();
@@ -2166,6 +2308,7 @@ module.exports = {
   deleteClientGbpPostingComment,
   listClientCitations,
   updateClient,
+  testClientDiscordConnection,
   createClientCitation,
   updateClientCitation,
   deleteClientCitation,

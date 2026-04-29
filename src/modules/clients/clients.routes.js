@@ -33,6 +33,7 @@ router.delete('/:id/gbp-postings/:postingId/comments/:commentId', requirePermiss
 router.get('/:id/citations', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.listClientCitations);
 router.get('/:id/projects', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.listClientProjects);
 router.post('/', requirePermission('add-new-client'), clientsController.createClient);
+router.post('/:id/discord/test', requirePermission('edit-location-details'), clientsController.testClientDiscordConnection);
 router.post('/:id/citations', requirePermission('edit-location-details'), clientsController.createClientCitation);
 router.patch(
   '/:id',

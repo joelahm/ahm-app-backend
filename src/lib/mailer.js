@@ -163,6 +163,65 @@ function buildInviteHtml({ name, inviteUrl }) {
 </html>`;
 }
 
+function buildWebsiteContentReviewOtpHtml({ name, otp, expiresInMinutes }) {
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>AHM Website Content Review Code</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f6f8; font-family: Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f8; padding: 40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:8px; padding:40px;">
+          <tr>
+            <td align="center" style="padding-bottom: 20px;">
+              <img src="https://cdn.prod.website-files.com/695060a70f86706055aaf7e5/696531eb7ecaf37fcfae560f_Frame%2010.png" alt="AHM App Logo" width="120" />
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:24px; font-weight:bold; color:#333; padding-bottom:20px;">
+              Hi ${escapeHtml(name)},
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:16px; color:#555; line-height:1.6; padding-bottom:30px;">
+              Use the verification code below to access the website content review page. This helps us confirm the email address before showing the content.
+            </td>
+          </tr>
+
+          <tr>
+            <td align="center" style="padding-bottom:30px;">
+              <div style="display:inline-block; letter-spacing:8px; font-size:32px; font-weight:bold; color:#1a73e8; background:#f4f6f8; border-radius:8px; padding:16px 24px;">
+                ${escapeHtml(otp)}
+              </div>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:14px; color:#777; line-height:1.6; padding-bottom:20px;">
+              This code expires in ${escapeHtml(expiresInMinutes)} minutes. If you did not request this code, you can ignore this email.
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:14px; color:#777; text-align:center;">
+              Thank you,<br>
+              <strong>AHM App Team</strong>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
 async function sendInviteEmail({ env, to, inviteUrl, role, name }) {
   const tx = createTransporter(env);
   const recipientName = resolveInviteName(name, to);
@@ -176,6 +235,25 @@ async function sendInviteEmail({ env, to, inviteUrl, role, name }) {
   });
 }
 
+async function sendWebsiteContentReviewOtpEmail({ env, to, fullName, otp }) {
+  const tx = createTransporter(env);
+  const recipientName = resolveInviteName(fullName, to);
+  const expiresInMinutes = String(env.websiteContentReview.otpExpiresMinutes);
+
+  await tx.sendMail({
+    from: env.email.from,
+    to,
+    subject: 'Your AHM website content review code',
+    text: `Hi ${recipientName},\n\nYour website content review code is ${otp}. This code expires in ${expiresInMinutes} minutes.\n\nAHM App Team`,
+    html: buildWebsiteContentReviewOtpHtml({
+      expiresInMinutes,
+      name: recipientName,
+      otp,
+    })
+  });
+}
+
 module.exports = {
-  sendInviteEmail
+  sendInviteEmail,
+  sendWebsiteContentReviewOtpEmail
 };

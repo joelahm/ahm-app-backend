@@ -47,6 +47,7 @@ function normalizeKeywordItem(value) {
   const metaTitle = asString(source.metaTitle).trim();
   const status = asString(source.status).trim();
   const generatedContent = asString(source.generatedContent).trim();
+  const urlSlug = asString(source.urlSlug).trim();
 
   if (!keyword) {
     throw new AppError(400, 'VALIDATION_ERROR', 'Keyword is required.');
@@ -74,6 +75,7 @@ function normalizeKeywordItem(value) {
     searchVolume: Number.isFinite(source.searchVolume) ? source.searchVolume : null,
     status: status || 'Not started',
     title,
+    urlSlug: urlSlug || null,
   };
 }
 
@@ -169,6 +171,26 @@ function normalizeBreakdownPayload(payload) {
   return items.map(normalizeBreakdownItem);
 }
 
+function stringifyActivityValue(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+function readUserName(user) {
+  const parts = [user?.firstName, user?.lastName]
+    .map((value) => asString(value).trim())
+    .filter(Boolean);
+
+  return parts.join(' ') || asString(user?.email).trim() || null;
+}
+
 function getContentBreakdownSettingKey(clientId) {
   return `website_content_breakdown:${String(clientId)}`;
 }
@@ -236,8 +258,10 @@ async function updateKeywordContentListKeyword({ actorUserId, db, payload }) {
   const hasTitle = Object.prototype.hasOwnProperty.call(payload, 'title');
   const hasMetaTitle = Object.prototype.hasOwnProperty.call(payload, 'metaTitle');
   const hasMetaDescription = Object.prototype.hasOwnProperty.call(payload, 'metaDescription');
+  const hasUrlSlug = Object.prototype.hasOwnProperty.call(payload, 'urlSlug');
   const hasAltTitle = Object.prototype.hasOwnProperty.call(payload, 'altTitle');
   const hasAltDescription = Object.prototype.hasOwnProperty.call(payload, 'altDescription');
+  const hasFeaturedImage = Object.prototype.hasOwnProperty.call(payload, 'featuredImage');
   const hasGeneratedContent = Object.prototype.hasOwnProperty.call(
     payload,
     'generatedContent',
@@ -255,8 +279,10 @@ async function updateKeywordContentListKeyword({ actorUserId, db, payload }) {
   const title = asString(payload.title).trim();
   const metaTitle = asString(payload.metaTitle).trim() || null;
   const metaDescription = asString(payload.metaDescription).trim() || null;
+  const urlSlug = asString(payload.urlSlug).trim() || null;
   const altTitle = asString(payload.altTitle).trim() || null;
   const altDescription = asString(payload.altDescription).trim() || null;
+  const featuredImage = hasFeaturedImage ? payload.featuredImage ?? null : undefined;
   const generatedContentRaw = asString(payload.generatedContent);
   const generatedContent = generatedContentRaw.trim() || null;
 
@@ -305,6 +331,7 @@ async function updateKeywordContentListKeyword({ actorUserId, db, payload }) {
       contentType: hasContentType && contentType ? contentType : asString(item?.contentType).trim(),
       altDescription: hasAltDescription ? altDescription : item?.altDescription ?? null,
       altTitle: hasAltTitle ? altTitle : item?.altTitle ?? null,
+      featuredImage: hasFeaturedImage ? featuredImage : item?.featuredImage ?? null,
       generatedContent: hasGeneratedContent ? generatedContent : item?.generatedContent ?? null,
       isPillarArticle: hasIsPillarArticle
         ? Boolean(isPillarArticle)
@@ -316,8 +343,11 @@ async function updateKeywordContentListKeyword({ actorUserId, db, payload }) {
       metaTitle: hasMetaTitle ? metaTitle : item?.metaTitle ?? null,
       status: hasStatus && status ? status : asString(item?.status).trim() || 'Not started',
       title: hasTitle ? title : asString(item?.title).trim(),
+      urlSlug: hasUrlSlug ? urlSlug : item?.urlSlug ?? null,
     };
   });
+  const previousKeyword = existingKeywords[keywordIndex] || {};
+  const updatedKeyword = nextKeywords[keywordIndex] || {};
 
   await db.keywordContentList.update({
     where: { id: listId },
@@ -325,6 +355,79 @@ async function updateKeywordContentListKeyword({ actorUserId, db, payload }) {
       keywordsJson: nextKeywords,
     },
   });
+
+  const trackedFields = [
+    ['title', 'Article Title', hasTitle],
+    ['urlSlug', 'URL Slug', hasUrlSlug],
+    ['metaTitle', 'Meta Title', hasMetaTitle],
+    ['metaDescription', 'Meta Description', hasMetaDescription],
+    ['generatedContent', 'Content', hasGeneratedContent],
+    ['featuredImage', 'Featured Image', hasFeaturedImage],
+    ['altTitle', 'Alt Title', hasAltTitle],
+    ['altDescription', 'Alt Description', hasAltDescription],
+  ];
+  const changedFields = trackedFields
+    .filter(([, , wasProvided]) => wasProvided)
+    .map(([field, label]) => ({
+      field,
+      label,
+      newValue: stringifyActivityValue(updatedKeyword?.[field]),
+      oldValue: stringifyActivityValue(previousKeyword?.[field]),
+    }))
+    .filter((field) => field.oldValue !== field.newValue);
+
+  if (changedFields.length > 0) {
+    const actor = actorUserId
+      ? await db.user.findUnique({
+          where: { id: BigInt(actorUserId) },
+          select: { email: true, firstName: true, lastName: true },
+        })
+      : null;
+
+    await db.websiteContentVersion.create({
+      data: {
+        clientId: record.clientId,
+        createdByEmail: actor?.email || null,
+        createdByName: readUserName(actor),
+        createdByType: 'USER',
+        createdByUserId: actorUserId ? BigInt(actorUserId) : null,
+        keywordContentListId: listId,
+        keywordId,
+        snapshotJson: {
+          altDescription: updatedKeyword.altDescription ?? null,
+          altTitle: updatedKeyword.altTitle ?? null,
+          contentType: updatedKeyword.contentType ?? null,
+          generatedContent: updatedKeyword.generatedContent ?? null,
+          featuredImage: updatedKeyword.featuredImage ?? null,
+          keyword: updatedKeyword.keyword ?? null,
+          metaDescription: updatedKeyword.metaDescription ?? null,
+          metaTitle: updatedKeyword.metaTitle ?? null,
+          title: updatedKeyword.title ?? null,
+          urlSlug: updatedKeyword.urlSlug ?? null,
+        },
+        source: 'DASHBOARD_EDIT',
+      },
+    });
+
+    for (const field of changedFields) {
+      // eslint-disable-next-line no-await-in-loop
+      await db.websiteContentEditActivity.create({
+        data: {
+          action: 'FIELD_UPDATED',
+          actorEmail: actor?.email || null,
+          actorName: readUserName(actor),
+          actorType: 'USER',
+          actorUserId: actorUserId ? BigInt(actorUserId) : null,
+          clientId: record.clientId,
+          fieldName: field.label,
+          keywordContentListId: listId,
+          keywordId,
+          newValue: field.newValue,
+          oldValue: field.oldValue,
+        },
+      });
+    }
+  }
 
   if (actorUserId) {
     await db.auditLog.create({
@@ -337,12 +440,14 @@ async function updateKeywordContentListKeyword({ actorUserId, db, payload }) {
           hasAltDescription: hasAltDescription ? Boolean(altDescription) : undefined,
           hasAltTitle: hasAltTitle ? Boolean(altTitle) : undefined,
           hasGeneratedContent: hasGeneratedContent ? Boolean(generatedContent) : undefined,
+          hasFeaturedImage: hasFeaturedImage ? Boolean(featuredImage) : undefined,
           isPillarArticle:
             hasIsPillarArticle ? isPillarArticle : undefined,
           keywordId,
           listId: String(listId),
           hasMetaDescription: hasMetaDescription ? Boolean(metaDescription) : undefined,
           hasMetaTitle: hasMetaTitle ? Boolean(metaTitle) : undefined,
+          hasUrlSlug: hasUrlSlug ? Boolean(urlSlug) : undefined,
           parentKeywordId: hasParentKeywordId ? parentKeywordId : undefined,
           status: hasStatus ? (status || null) : undefined,
         },

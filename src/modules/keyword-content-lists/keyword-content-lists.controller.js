@@ -1,4 +1,6 @@
 const keywordContentListsService = require('./keyword-content-lists.service');
+const path = require('path');
+const { AppError } = require('../../lib/errors');
 
 async function listKeywordContentLists(req, res, next) {
   try {
@@ -82,6 +84,33 @@ async function saveClientContentBreakdown(req, res, next) {
   }
 }
 
+async function uploadFeaturedImage(req, res, next) {
+  try {
+    if (!req.file) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Featured image is required.');
+    }
+
+    const url = `/uploads/website-content/${path.basename(req.file.path)}`;
+    const origin = `${req.protocol}://${req.get('host')}`;
+
+    res.status(201).json({
+      featuredImage: {
+        mimeType: req.file.mimetype,
+        name: req.file.originalname,
+        size: req.file.size,
+        sizeLabel:
+          req.file.size < 1024 * 1024
+            ? `${Math.max(req.file.size / 1024, 1).toFixed(0)} KB`
+            : `${(req.file.size / (1024 * 1024)).toFixed(2)} MB`,
+        url,
+        previewUrl: `${origin}${url}`,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   listKeywordContentLists,
   createKeywordContentList,
@@ -89,4 +118,5 @@ module.exports = {
   deleteKeywordContentListKeyword,
   getClientContentBreakdown,
   saveClientContentBreakdown,
+  uploadFeaturedImage,
 };
