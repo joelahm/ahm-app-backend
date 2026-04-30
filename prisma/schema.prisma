@@ -65,6 +65,8 @@ model User {
   createdProjectTasks          ProjectTask[]   @relation("ProjectTaskCreatedBy")
   taskComments                 TaskComment[]   @relation("TaskCommentCreatedBy")
   projectComments              ProjectComment[] @relation("ProjectCommentCreatedBy")
+  receivedNotifications        Notification[] @relation("NotificationRecipient")
+  actedNotifications           Notification[] @relation("NotificationActor")
   externalApiLogs              ExternalApiLog[] @relation("ExternalApiLogRequestedBy")
   manusApiLogs                 ManusApiLog[] @relation("ManusApiLogRequestedBy")
   createdScans                 Scan[]         @relation("ScanCreatedBy")
@@ -373,6 +375,53 @@ model TaskComment {
   @@index([taskId], map: "idx_task_comments_task_id")
   @@index([createdBy], map: "idx_task_comments_created_by")
   @@map("task_comments")
+}
+
+model Notification {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  recipientUserId BigInt    @map("recipient_user_id") @db.UnsignedBigInt
+  actorUserId     BigInt?   @map("actor_user_id") @db.UnsignedBigInt
+  type            String    @db.VarChar(96)
+  title           String    @db.VarChar(180)
+  body            String    @db.Text
+  category        String    @default("OTHER") @db.VarChar(32)
+  severity        String    @default("INFO") @db.VarChar(32)
+  entityType      String?   @map("entity_type") @db.VarChar(64)
+  entityId        String?   @map("entity_id") @db.VarChar(64)
+  dataJson        Json?     @map("data_json")
+  readAt          DateTime? @map("read_at")
+  clearedAt       DateTime? @map("cleared_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  recipient       User      @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade, map: "fk_notifications_recipient")
+  actor           User?     @relation("NotificationActor", fields: [actorUserId], references: [id], onDelete: SetNull, map: "fk_notifications_actor")
+  deliveries      NotificationDelivery[]
+
+  @@index([recipientUserId, clearedAt, readAt, createdAt], map: "idx_notifications_recipient_state")
+  @@index([type, createdAt], map: "idx_notifications_type_created")
+  @@index([entityType, entityId], map: "idx_notifications_entity")
+  @@map("notifications")
+}
+
+model NotificationDelivery {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  notificationId BigInt    @map("notification_id") @db.UnsignedBigInt
+  channel        String    @db.VarChar(32)
+  provider       String    @db.VarChar(64)
+  target         String?   @db.VarChar(255)
+  status         String    @default("PENDING") @db.VarChar(32)
+  attemptCount   Int       @default(0) @map("attempt_count")
+  lastError      String?   @map("last_error") @db.Text
+  sentAt         DateTime? @map("sent_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade, map: "fk_notification_deliveries_notification")
+
+  @@index([notificationId], map: "idx_notification_deliveries_notification")
+  @@index([channel, status, createdAt], map: "idx_notification_deliveries_channel_status")
+  @@map("notification_deliveries")
 }
 
 model ProjectComment {

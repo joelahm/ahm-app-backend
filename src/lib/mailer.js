@@ -253,7 +253,42 @@ async function sendWebsiteContentReviewOtpEmail({ env, to, fullName, otp }) {
   });
 }
 
+async function sendNotificationEmail({ body, env, title, to }) {
+  const tx = createTransporter(env);
+
+  await tx.sendMail({
+    from: env.email.from,
+    to,
+    subject: title,
+    text: body,
+    html: `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapeHtml(title)}</title>
+</head>
+<body style="margin:0; padding:0; background-color:#f4f6f8; font-family: Arial, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f8; padding: 32px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:8px; padding:32px;">
+          <tr>
+            <td>
+              <h1 style="margin:0 0 16px; color:#111827; font-size:20px;">${escapeHtml(title)}</h1>
+              <p style="margin:0; color:#374151; font-size:14px; line-height:1.6;">${escapeHtml(body)}</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`
+  });
+}
+
 module.exports = {
   sendInviteEmail,
+  sendNotificationEmail,
   sendWebsiteContentReviewOtpEmail
 };

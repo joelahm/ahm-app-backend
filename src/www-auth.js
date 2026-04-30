@@ -11,7 +11,10 @@ const port = normalizePort(process.env.PORT || '3000');
 app.set('port', port);
 
 const server = http.createServer(app);
-const io = attachSocketServer(server);
+const io = attachSocketServer(server, {
+  db: app.locals.db,
+  env: app.locals.env
+});
 app.locals.io = io;
 app.locals.scanScheduler = startScanScheduler({
   db: app.locals.db,

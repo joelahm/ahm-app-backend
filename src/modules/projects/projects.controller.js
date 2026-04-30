@@ -1,5 +1,6 @@
 const { AppError } = require('../../lib/errors');
 const projectsService = require('./projects.service');
+const notificationsService = require('../notifications/notifications.service');
 const { writeAuditLog } = require('../../lib/audit-log');
 
 function readProjectId(req) {
@@ -65,6 +66,14 @@ async function createProjectTask(req, res, next) {
       }
     });
 
+    await notificationsService.notifyTaskAssigned({
+      actorUserId: req.auth.userId,
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      io: req.app.locals.io,
+      taskId: task.id
+    });
+
     res.status(201).json({ task });
   } catch (err) {
     next(err);
@@ -94,6 +103,14 @@ async function createProjectTaskFromBody(req, res, next) {
       }
     });
 
+    await notificationsService.notifyTaskAssigned({
+      actorUserId: req.auth.userId,
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      io: req.app.locals.io,
+      taskId: task.id
+    });
+
     res.status(201).json({ task });
   } catch (err) {
     next(err);
@@ -103,6 +120,14 @@ async function createProjectTaskFromBody(req, res, next) {
 async function updateProjectTask(req, res, next) {
   try {
     const taskId = readTaskId(req);
+    const previousTask = await req.app.locals.db.projectTask.findUnique({
+      where: { id: BigInt(taskId) },
+      select: {
+        assignedTo: true,
+        id: true,
+        status: true
+      }
+    });
     const task = await projectsService.updateTask({
       db: req.app.locals.db,
       taskId,
@@ -119,6 +144,28 @@ async function updateProjectTask(req, res, next) {
       metadata: {
         updatedFields: Object.keys(req.body || {})
       }
+    });
+
+    if (
+      task.assignedToId &&
+      Number(previousTask?.assignedTo || 0) !== Number(task.assignedToId)
+    ) {
+      await notificationsService.notifyTaskAssigned({
+        actorUserId: req.auth.userId,
+        db: req.app.locals.db,
+        env: req.app.locals.env,
+        io: req.app.locals.io,
+        taskId: task.id
+      });
+    }
+
+    await notificationsService.notifyTaskStatusChanged({
+      actorUserId: req.auth.userId,
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      io: req.app.locals.io,
+      nextTask: task,
+      previousTask
     });
 
     res.status(200).json({ task });
@@ -196,6 +243,15 @@ async function createTaskComment(req, res, next) {
       metadata: {
         taskId
       }
+    });
+
+    await notificationsService.notifyTaskCommentCreated({
+      actorUserId: req.auth.userId,
+      comment,
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      io: req.app.locals.io,
+      taskId
     });
 
     res.status(201).json({ comment });
