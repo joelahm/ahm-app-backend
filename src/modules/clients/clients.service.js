@@ -72,6 +72,7 @@ const CLIENT_LIST_PROJECT_INCLUDE = {
     createdAt: 'desc'
   }
 };
+const DISCORD_CHANNEL_ID_REGEX = /^\d{15,25}$/;
 
 function toJsonArray(value) {
   if (!value) return [];
@@ -1065,6 +1066,126 @@ async function listClients({ db }) {
   return clients.map(mapClient);
 }
 
+function getDiscordBotToken(env) {
+  const botToken = env?.integrations?.discord?.botToken;
+
+  if (!botToken) {
+    throw new AppError(
+      500,
+      'CONFIGURATION_ERROR',
+      'Discord bot token is not configured.'
+    );
+  }
+
+  return botToken;
+}
+
+async function fetchDiscordLatestMessage({ botToken, channelId }) {
+  const response = await fetch(
+    `https://discord.com/api/v10/channels/${channelId}/messages?limit=1`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bot ${botToken}`
+      }
+    }
+  );
+
+  if (!response.ok) {
+    let details = null;
+    try {
+      details = await response.json();
+    } catch {
+      details = await response.text().catch(() => null);
+    }
+
+    return {
+      details,
+      status: 'error',
+      upstreamStatus: response.status
+    };
+  }
+
+  const messages = await response.json();
+  const latestMessage = Array.isArray(messages) ? messages[0] : null;
+
+  if (!latestMessage) {
+    return {
+      lastMessage: null,
+      status: 'empty'
+    };
+  }
+
+  return {
+    lastMessage: {
+      authorName:
+        latestMessage.author?.global_name ||
+        latestMessage.author?.username ||
+        latestMessage.author?.id ||
+        null,
+      content: typeof latestMessage.content === 'string' ? latestMessage.content : '',
+      createdAt: latestMessage.timestamp || null,
+      id: latestMessage.id || null
+    },
+    status: 'connected'
+  };
+}
+
+async function listClientDiscordStatuses({ db, env }) {
+  const clients = await db.client.findMany({
+    orderBy: { id: 'desc' },
+    select: {
+      businessName: true,
+      clientName: true,
+      discordChannel: true,
+      id: true
+    }
+  });
+  const botToken = getDiscordBotToken(env);
+  const statuses = [];
+
+  for (const client of clients) {
+    const clientId = Number(client.id);
+    const channelId = parseOptionalString(client.discordChannel);
+
+    if (!channelId) {
+      statuses.push({
+        channelId: null,
+        clientId,
+        lastMessage: null,
+        status: 'not_configured'
+      });
+      continue;
+    }
+
+    if (!DISCORD_CHANNEL_ID_REGEX.test(channelId)) {
+      statuses.push({
+        channelId,
+        clientId,
+        error: 'Discord channel must be a valid channel ID.',
+        lastMessage: null,
+        status: 'invalid_channel'
+      });
+      continue;
+    }
+
+    const discordStatus = await fetchDiscordLatestMessage({
+      botToken,
+      channelId
+    });
+
+    statuses.push({
+      channelId,
+      clientId,
+      lastMessage: discordStatus.lastMessage ?? null,
+      status: discordStatus.status,
+      upstreamStatus: discordStatus.upstreamStatus ?? null
+    });
+  }
+
+  return statuses;
+}
+
 async function getClientById({ db, clientId }) {
   const client = await db.client.findUnique({
     where: { id: BigInt(clientId) },
@@ -1857,14 +1978,7 @@ async function testClientDiscordConnection({ db, env, clientId, payload }) {
     throw new AppError(404, 'NOT_FOUND', 'Client not found.');
   }
 
-  const botToken = env?.integrations?.discord?.botToken;
-  if (!botToken) {
-    throw new AppError(
-      500,
-      'CONFIGURATION_ERROR',
-      'Discord bot token is not configured.'
-    );
-  }
+  const botToken = getDiscordBotToken(env);
 
   const channelId = parseOptionalString(payload.discordChannel) || client.discordChannel;
   if (!channelId) {
@@ -1875,7 +1989,7 @@ async function testClientDiscordConnection({ db, env, clientId, payload }) {
     );
   }
 
-  if (!/^\d{15,25}$/.test(channelId)) {
+  if (!DISCORD_CHANNEL_ID_REGEX.test(channelId)) {
     throw new AppError(
       400,
       'VALIDATION_ERROR',
@@ -2293,6 +2407,7 @@ async function listClientProjects({ db, clientId, page = 1, limit = 20 }) {
 module.exports = {
   createClient,
   listClients,
+  listClientDiscordStatuses,
   getClientById,
   getClientGbpDetails,
   getClientGbpReviews,

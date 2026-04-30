@@ -67,6 +67,22 @@ async function listClients(req, res, next) {
   }
 }
 
+async function listClientDiscordStatuses(req, res, next) {
+  try {
+    const statuses = await clientsService.listClientDiscordStatuses({
+      db: req.app.locals.db,
+      env: req.app.locals.env
+    });
+
+    res.status(200).json({
+      statuses,
+      total: statuses.length
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getClientById(req, res, next) {
   try {
     const clientId = readClientId(req);
@@ -534,6 +550,7 @@ async function listClientProjects(req, res, next) {
 
 module.exports = {
   listClients,
+  listClientDiscordStatuses,
   getClientById,
   getClientGbpDetails,
   getClientGbpReviews,

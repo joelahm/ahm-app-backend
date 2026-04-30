@@ -17,6 +17,7 @@ const CLIENT_READ_PERMISSIONS = [
 ];
 
 router.get('/', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.listClients);
+router.get('/discord/statuses', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.listClientDiscordStatuses);
 router.get('/:id', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.getClientById);
 router.get('/:id/gbp-details', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.getClientGbpDetails);
 router.get('/:id/reviews', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.getClientGbpReviews);
