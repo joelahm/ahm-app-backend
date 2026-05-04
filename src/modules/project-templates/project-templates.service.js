@@ -1,35 +1,36 @@
-const { randomUUID } = require('crypto');
-const { AppError } = require('../../lib/errors');
+const { randomUUID } = require("crypto");
+const { AppError } = require("../../lib/errors");
 
-const PROJECT_TEMPLATES_SETTINGS_KEY = 'project_templates';
-const PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY = 'project_template_status_options';
+const PROJECT_TEMPLATES_SETTINGS_KEY = "project_templates";
+const PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY =
+  "project_template_status_options";
 const DEFAULT_TEMPLATE_STATUSES = [
-  'Onboarding',
-  'Planning',
-  'Implementation',
-  'On hold',
-  'Closed',
-  'Cancelled'
+  "On Going",
+  "On Hold",
+  "Completed",
+  "Cancelled",
+  "Archived",
+  "Delayed",
 ];
 
 function asObject(value) {
-  return typeof value === 'object' && value !== null ? value : {};
+  return typeof value === "object" && value !== null ? value : {};
 }
 
-function asString(value, fallback = '') {
-  return typeof value === 'string' ? value : fallback;
+function asString(value, fallback = "") {
+  return typeof value === "string" ? value : fallback;
 }
 
 function asBoolean(value, fallback = false) {
-  return typeof value === 'boolean' ? value : fallback;
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function asNumber(value, fallback = 0) {
-  if (typeof value === 'number' && Number.isFinite(value)) {
+  if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
 
-  if (typeof value === 'string' && value.trim()) {
+  if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
   }
@@ -40,9 +41,43 @@ function asNumber(value, fallback = 0) {
 function buildUserDisplayName(user) {
   const firstName = asString(user?.firstName).trim();
   const lastName = asString(user?.lastName).trim();
-  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
 
-  return fullName || asString(user?.email) || 'Unknown';
+  return fullName || asString(user?.email) || "Unknown";
+}
+
+function normalizeProjectStatus(value) {
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ");
+
+  if (!normalized) return "On Going";
+  if (
+    [
+      "active",
+      "draft",
+      "implementation",
+      "in progress",
+      "onboarding",
+      "ongoing",
+      "on going",
+      "planning",
+    ].includes(normalized)
+  ) {
+    return "On Going";
+  }
+  if (normalized === "on hold" || normalized === "hold") return "On Hold";
+  if (
+    ["closed", "complete", "completed", "done", "finished"].includes(normalized)
+  )
+    return "Completed";
+  if (normalized === "cancel" || normalized === "cancelled") return "Cancelled";
+  if (normalized === "archived") return "Archived";
+  if (normalized === "delayed" || normalized === "overdue") return "Delayed";
+
+  return "On Going";
 }
 
 function normalizeTask(value, index) {
@@ -50,28 +85,31 @@ function normalizeTask(value, index) {
   const taskName = asString(source.taskName || source.title).trim();
   const labels = Array.isArray(source.labels)
     ? source.labels
-        .filter((item) => typeof item === 'string' && item.trim())
+        .filter((item) => typeof item === "string" && item.trim())
         .map((item) => item.trim())
-    : (asString(source.label).trim() ? [asString(source.label).trim()] : []);
+    : asString(source.label).trim()
+      ? [asString(source.label).trim()]
+      : [];
 
   return {
     id: asString(source.id) || `task-${index + 1}`,
     taskName: taskName || `Task ${index + 1}`,
-    taskDescription: asString(source.taskDescription || source.description) || '-',
+    taskDescription:
+      asString(source.taskDescription || source.description) || "-",
     level: Math.max(0, Math.min(2, asNumber(source.level, 0))),
     labels,
-    dependency: asString(source.dependency) || '-',
-    dueDateTrigger: asString(source.dueDateTrigger) || 'On trigger date',
+    dependency: asString(source.dependency) || "-",
+    dueDateTrigger: asString(source.dueDateTrigger) || "On trigger date",
     isExpanded: asBoolean(source.isExpanded),
     isSelected: asBoolean(source.isSelected),
     assigneeId: asString(source.assigneeId),
     assigneeName: asString(source.assigneeName),
-    status: asString(source.status),
+    status: normalizeProjectStatus(source.status),
     parentTaskId: asString(source.parentTaskId),
     blockedTaskId: asString(source.blockedTaskId),
     enableDependency: asBoolean(source.enableDependency),
     dependencyType: asString(source.dependencyType),
-    title: taskName || `Task ${index + 1}`
+    title: taskName || `Task ${index + 1}`,
   };
 }
 
@@ -97,8 +135,8 @@ function normalizeStoredProjectTemplate(value) {
     createdBy: {
       id: asNumber(createdBy.id, 0),
       name: asString(createdBy.name),
-      email: asString(createdBy.email)
-    }
+      email: asString(createdBy.email),
+    },
   };
 }
 
@@ -113,8 +151,9 @@ function parseStoredProjectTemplatesValue(value) {
       .map((item) => normalizeStoredProjectTemplate(item))
       .sort(
         (left, right) =>
-          new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
-      )
+          new Date(right.createdAt).getTime() -
+          new Date(left.createdAt).getTime(),
+      ),
   };
 }
 
@@ -128,12 +167,14 @@ function normalizeStatusOptionsValue(value) {
 
   const options = rawOptions
     .map((item) => {
-      if (typeof item === 'string') {
-        return item.trim();
+      if (typeof item === "string") {
+        return normalizeProjectStatus(item);
       }
 
       const itemSource = asObject(item);
-      return asString(itemSource.label || itemSource.value || itemSource.name).trim();
+      return normalizeProjectStatus(
+        itemSource.label || itemSource.value || itemSource.name,
+      );
     })
     .filter(Boolean)
     .filter((item, index, current) => current.indexOf(item) === index);
@@ -148,17 +189,17 @@ async function persistProjectTemplateStatusOptions({ db, statusOptions }) {
     where: { key: PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY },
     create: {
       key: PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY,
-      valueJson
+      valueJson,
     },
     update: {
-      valueJson
-    }
+      valueJson,
+    },
   });
 }
 
 async function getProjectTemplateStatusOptions({ db }) {
   const setting = await db.appSetting.findUnique({
-    where: { key: PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY }
+    where: { key: PROJECT_TEMPLATE_STATUS_OPTIONS_SETTINGS_KEY },
   });
   const statusOptions = normalizeStatusOptionsValue(setting?.valueJson);
 
@@ -172,16 +213,20 @@ async function getProjectTemplateStatusOptions({ db }) {
 async function normalizeCreateProjectTemplatePayload({ db, payload }) {
   const source = asObject(payload);
   const projectName = asString(source.projectName).trim();
-  const status = asString(source.status).trim();
+  const status = normalizeProjectStatus(source.status);
 
   if (!projectName) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Project name is required.');
+    throw new AppError(400, "VALIDATION_ERROR", "Project name is required.");
   }
 
   const { statusOptions } = await getProjectTemplateStatusOptions({ db });
 
   if (!status || !statusOptions.includes(status)) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid project template status.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "Invalid project template status.",
+    );
   }
 
   const tasks = Array.isArray(source.tasks)
@@ -192,7 +237,7 @@ async function normalizeCreateProjectTemplatePayload({ db, payload }) {
     projectName,
     description: asString(source.description),
     status,
-    tasks
+    tasks,
   };
 }
 
@@ -205,16 +250,22 @@ function mapProjectTemplateRecord(record) {
     id: asString(record.id),
     projectName: asString(record.projectName),
     description: asString(record.description),
-    status: asString(record.status),
+    status: normalizeProjectStatus(record.status),
     tasks,
     totalTasks: tasks.length,
-    createdAt: record.createdAt instanceof Date ? record.createdAt.toISOString() : asString(record.createdAt),
-    updatedAt: record.updatedAt instanceof Date ? record.updatedAt.toISOString() : asString(record.updatedAt),
+    createdAt:
+      record.createdAt instanceof Date
+        ? record.createdAt.toISOString()
+        : asString(record.createdAt),
+    updatedAt:
+      record.updatedAt instanceof Date
+        ? record.updatedAt.toISOString()
+        : asString(record.updatedAt),
     createdBy: {
       id: record.creator?.id ? Number(record.creator.id) : 0,
       name: buildUserDisplayName(record.creator),
-      email: asString(record.creator?.email)
-    }
+      email: asString(record.creator?.email),
+    },
   };
 }
 
@@ -226,14 +277,16 @@ async function migrateLegacyProjectTemplatesIfNeeded({ db }) {
   }
 
   const setting = await db.appSetting.findUnique({
-    where: { key: PROJECT_TEMPLATES_SETTINGS_KEY }
+    where: { key: PROJECT_TEMPLATES_SETTINGS_KEY },
   });
 
   if (!setting) {
     return;
   }
 
-  const legacyTemplates = parseStoredProjectTemplatesValue(setting.valueJson).projectTemplates;
+  const legacyTemplates = parseStoredProjectTemplatesValue(
+    setting.valueJson,
+  ).projectTemplates;
 
   if (!legacyTemplates.length) {
     return;
@@ -246,7 +299,7 @@ async function migrateLegacyProjectTemplatesIfNeeded({ db }) {
     if (Number.isFinite(createdById) && createdById > 0) {
       const creator = await db.user.findUnique({
         where: { id: BigInt(createdById) },
-        select: { id: true }
+        select: { id: true },
       });
       createdBy = creator ? BigInt(createdById) : null;
     }
@@ -261,7 +314,7 @@ async function migrateLegacyProjectTemplatesIfNeeded({ db }) {
         tasks: template.tasks,
         createdBy,
         createdAt: new Date(template.createdAt),
-        updatedAt: new Date(template.updatedAt)
+        updatedAt: new Date(template.updatedAt),
       },
       update: {
         projectName: template.projectName,
@@ -270,8 +323,8 @@ async function migrateLegacyProjectTemplatesIfNeeded({ db }) {
         tasks: template.tasks,
         createdBy,
         createdAt: new Date(template.createdAt),
-        updatedAt: new Date(template.updatedAt)
-      }
+        updatedAt: new Date(template.updatedAt),
+      },
     });
   }
 }
@@ -280,27 +333,32 @@ async function getProjectTemplates({ db }) {
   await migrateLegacyProjectTemplatesIfNeeded({ db });
 
   const projectTemplates = await db.projectTemplate.findMany({
-    orderBy: { createdAt: 'desc' },
+    orderBy: { createdAt: "desc" },
     include: {
       creator: {
         select: {
           id: true,
           firstName: true,
           lastName: true,
-          email: true
-        }
-      }
-    }
+          email: true,
+        },
+      },
+    },
   });
 
   return {
-    projectTemplates: projectTemplates.map((record) => mapProjectTemplateRecord(record))
+    projectTemplates: projectTemplates.map((record) =>
+      mapProjectTemplateRecord(record),
+    ),
   };
 }
 
 async function createProjectTemplate({ db, actorUserId, payload }) {
   await migrateLegacyProjectTemplatesIfNeeded({ db });
-  const normalizedPayload = await normalizeCreateProjectTemplatePayload({ db, payload });
+  const normalizedPayload = await normalizeCreateProjectTemplatePayload({
+    db,
+    payload,
+  });
   const createdBy = actorUserId ? BigInt(actorUserId) : null;
 
   const projectTemplate = await db.projectTemplate.create({
@@ -310,7 +368,7 @@ async function createProjectTemplate({ db, actorUserId, payload }) {
       description: normalizedPayload.description,
       status: normalizedPayload.status,
       tasks: normalizedPayload.tasks,
-      createdBy
+      createdBy,
     },
     include: {
       creator: {
@@ -318,15 +376,15 @@ async function createProjectTemplate({ db, actorUserId, payload }) {
           id: true,
           firstName: true,
           lastName: true,
-          email: true
-        }
-      }
-    }
+          email: true,
+        },
+      },
+    },
   });
 
   return {
     success: true,
-    projectTemplate: mapProjectTemplateRecord(projectTemplate)
+    projectTemplate: mapProjectTemplateRecord(projectTemplate),
   };
 }
 
@@ -335,34 +393,37 @@ async function deleteProjectTemplate({ db, templateId }) {
 
   const existingTemplate = await db.projectTemplate.findUnique({
     where: { id: templateId },
-    select: { id: true }
+    select: { id: true },
   });
 
   if (!existingTemplate) {
-    throw new AppError(404, 'NOT_FOUND', 'Project template not found.');
+    throw new AppError(404, "NOT_FOUND", "Project template not found.");
   }
 
   await db.projectTemplate.delete({
-    where: { id: templateId }
+    where: { id: templateId },
   });
 
   return {
     success: true,
-    projectTemplate: { id: templateId }
+    projectTemplate: { id: templateId },
   };
 }
 
 async function updateProjectTemplate({ db, templateId, payload }) {
   await migrateLegacyProjectTemplatesIfNeeded({ db });
-  const normalizedPayload = await normalizeCreateProjectTemplatePayload({ db, payload });
+  const normalizedPayload = await normalizeCreateProjectTemplatePayload({
+    db,
+    payload,
+  });
 
   const existingTemplate = await db.projectTemplate.findUnique({
     where: { id: templateId },
-    select: { id: true }
+    select: { id: true },
   });
 
   if (!existingTemplate) {
-    throw new AppError(404, 'NOT_FOUND', 'Project template not found.');
+    throw new AppError(404, "NOT_FOUND", "Project template not found.");
   }
 
   const projectTemplate = await db.projectTemplate.update({
@@ -371,7 +432,7 @@ async function updateProjectTemplate({ db, templateId, payload }) {
       projectName: normalizedPayload.projectName,
       description: normalizedPayload.description,
       status: normalizedPayload.status,
-      tasks: normalizedPayload.tasks
+      tasks: normalizedPayload.tasks,
     },
     include: {
       creator: {
@@ -379,15 +440,15 @@ async function updateProjectTemplate({ db, templateId, payload }) {
           id: true,
           firstName: true,
           lastName: true,
-          email: true
-        }
-      }
-    }
+          email: true,
+        },
+      },
+    },
   });
 
   return {
     success: true,
-    projectTemplate: mapProjectTemplateRecord(projectTemplate)
+    projectTemplate: mapProjectTemplateRecord(projectTemplate),
   };
 }
 
@@ -396,5 +457,5 @@ module.exports = {
   getProjectTemplateStatusOptions,
   createProjectTemplate,
   updateProjectTemplate,
-  deleteProjectTemplate
+  deleteProjectTemplate,
 };

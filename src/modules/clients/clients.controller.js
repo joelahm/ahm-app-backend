@@ -1,13 +1,13 @@
-const clientsService = require('./clients.service');
-const { AppError } = require('../../lib/errors');
-const { writeAuditLog } = require('../../lib/audit-log');
-const fs = require('fs/promises');
-const path = require('path');
+const clientsService = require("./clients.service");
+const { AppError } = require("../../lib/errors");
+const { writeAuditLog } = require("../../lib/audit-log");
+const fs = require("fs/promises");
+const path = require("path");
 
 function readClientId(req) {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid client id.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid client id.");
   }
   return id;
 }
@@ -15,7 +15,7 @@ function readClientId(req) {
 function readCitationId(req) {
   const id = Number(req.params.citationId);
   if (!Number.isFinite(id) || id <= 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid citation id.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid citation id.");
   }
   return id;
 }
@@ -23,7 +23,7 @@ function readCitationId(req) {
 function readProjectId(req) {
   const id = Number(req.params.projectId);
   if (!Number.isFinite(id) || id <= 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid project id.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid project id.");
   }
   return id;
 }
@@ -31,7 +31,7 @@ function readProjectId(req) {
 function readPostingId(req) {
   const id = Number(req.params.postingId);
   if (!Number.isFinite(id) || id <= 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid posting id.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid posting id.");
   }
   return id;
 }
@@ -39,15 +39,15 @@ function readPostingId(req) {
 function readCommentId(req) {
   const id = Number(req.params.commentId);
   if (!Number.isFinite(id) || id <= 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid comment id.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid comment id.");
   }
   return id;
 }
 
 function readReviewId(req) {
-  const reviewId = String(req.params.reviewId || '').trim();
+  const reviewId = String(req.params.reviewId || "").trim();
   if (!reviewId) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid review id.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid review id.");
   }
   return decodeURIComponent(reviewId);
 }
@@ -55,12 +55,14 @@ function readReviewId(req) {
 async function listClients(req, res, next) {
   try {
     const clients = await clientsService.listClients({
-      db: req.app.locals.db
+      db: req.app.locals.db,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId,
     });
 
     res.status(200).json({
       clients,
-      total: clients.length
+      total: clients.length,
     });
   } catch (err) {
     next(err);
@@ -71,12 +73,14 @@ async function listClientDiscordStatuses(req, res, next) {
   try {
     const statuses = await clientsService.listClientDiscordStatuses({
       db: req.app.locals.db,
-      env: req.app.locals.env
+      env: req.app.locals.env,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId,
     });
 
     res.status(200).json({
       statuses,
-      total: statuses.length
+      total: statuses.length,
     });
   } catch (err) {
     next(err);
@@ -88,7 +92,9 @@ async function getClientById(req, res, next) {
     const clientId = readClientId(req);
     const client = await clientsService.getClientById({
       db: req.app.locals.db,
-      clientId
+      clientId,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId,
     });
 
     res.status(200).json({ client });
@@ -102,7 +108,7 @@ async function getClientGbpDetails(req, res, next) {
     const clientId = readClientId(req);
     const gbpDetails = await clientsService.getClientGbpDetails({
       db: req.app.locals.db,
-      clientId
+      clientId,
     });
 
     res.status(200).json(gbpDetails);
@@ -119,7 +125,7 @@ async function getClientGbpReviews(req, res, next) {
       env: req.app.locals.env,
       clientId,
       requestedBy: req.auth.userId,
-      query: req.query || {}
+      query: req.query || {},
     });
 
     res.status(200).json(reviews);
@@ -137,7 +143,7 @@ async function saveClientReviewReplyDraft(req, res, next) {
       clientId,
       reviewId,
       actorUserId: req.auth.userId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     res.status(200).json({ draft });
@@ -151,12 +157,12 @@ async function listClientGbpPostings(req, res, next) {
     const clientId = readClientId(req);
     const postings = await clientsService.listClientGbpPostings({
       db: req.app.locals.db,
-      clientId
+      clientId,
     });
 
     res.status(200).json({
       postings,
-      total: postings.length
+      total: postings.length,
     });
   } catch (err) {
     next(err);
@@ -170,12 +176,12 @@ async function createClientGbpPostings(req, res, next) {
       db: req.app.locals.db,
       clientId,
       actorUserId: req.auth.userId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     res.status(201).json({
       postings,
-      total: postings.length
+      total: postings.length,
     });
   } catch (err) {
     next(err);
@@ -190,7 +196,7 @@ async function generateClientGbpPostings(req, res, next) {
       env: req.app.locals.env,
       clientId,
       actorUserId: req.auth.userId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     res.status(201).json(result);
@@ -209,7 +215,7 @@ async function generateClientGbpPostingContent(req, res, next) {
       clientId,
       postingId,
       actorUserId: req.auth.userId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     res.status(200).json(result);
@@ -226,7 +232,7 @@ async function patchClientGbpPosting(req, res, next) {
       db: req.app.locals.db,
       clientId,
       postingId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     res.status(200).json({ posting });
@@ -242,7 +248,7 @@ async function deleteClientGbpPosting(req, res, next) {
     await clientsService.deleteClientGbpPosting({
       db: req.app.locals.db,
       clientId,
-      postingId
+      postingId,
     });
 
     res.status(204).send();
@@ -258,7 +264,7 @@ async function listClientGbpPostingComments(req, res, next) {
     const comments = await clientsService.listClientGbpPostingComments({
       db: req.app.locals.db,
       clientId,
-      postingId
+      postingId,
     });
 
     res.status(200).json({ comments, total: comments.length });
@@ -276,7 +282,7 @@ async function createClientGbpPostingComment(req, res, next) {
       clientId,
       postingId,
       actorUserId: req.auth.userId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     res.status(201).json({ comment });
@@ -295,7 +301,7 @@ async function deleteClientGbpPostingComment(req, res, next) {
       clientId,
       postingId,
       commentId,
-      actorUserId: req.auth.userId
+      actorUserId: req.auth.userId,
     });
 
     res.status(204).send();
@@ -309,12 +315,12 @@ async function listClientCitations(req, res, next) {
     const clientId = readClientId(req);
     const citations = await clientsService.listClientCitations({
       db: req.app.locals.db,
-      clientId
+      clientId,
     });
 
     res.status(200).json({
       citations,
-      total: citations.length
+      total: citations.length,
     });
   } catch (err) {
     next(err);
@@ -326,19 +332,19 @@ async function createClient(req, res, next) {
     const client = await clientsService.createClient({
       db: req.app.locals.db,
       actorUserId: req.auth.userId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'CLIENT_CREATED',
-      resourceType: 'client',
+      action: "CLIENT_CREATED",
+      resourceType: "client",
       resourceId: client.id,
       metadata: {
-        businessName: client.businessName
-      }
+        businessName: client.businessName,
+      },
     });
 
     res.status(201).json({ client });
@@ -354,19 +360,19 @@ async function patchClient(req, res, next) {
       db: req.app.locals.db,
       clientId,
       payload: req.body || {},
-      files: req.files || []
+      files: req.files || [],
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'CLIENT_UPDATED',
-      resourceType: 'client',
+      action: "CLIENT_UPDATED",
+      resourceType: "client",
       resourceId: clientId,
       metadata: {
-        updatedFields: Object.keys(req.body || {})
-      }
+        updatedFields: Object.keys(req.body || {}),
+      },
     });
 
     res.status(200).json({ client });
@@ -389,7 +395,7 @@ async function testClientDiscordConnection(req, res, next) {
       db: req.app.locals.db,
       env: req.app.locals.env,
       clientId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     res.status(200).json(result);
@@ -403,22 +409,24 @@ async function createClientProject(req, res, next) {
     const clientId = readClientId(req);
     const project = await clientsService.createClientProject({
       db: req.app.locals.db,
+      env: req.app.locals.env,
+      io: req.app.locals.io,
       actorUserId: req.auth.userId,
       clientId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'PROJECT_CREATED',
-      resourceType: 'client_project',
+      action: "PROJECT_CREATED",
+      resourceType: "client_project",
       resourceId: project.id,
       metadata: {
         clientId,
-        project: project.project
-      }
+        project: project.project,
+      },
     });
 
     res.status(201).json({ project });
@@ -434,17 +442,17 @@ async function deleteClientProject(req, res, next) {
     const deletedProject = await clientsService.deleteClientProject({
       db: req.app.locals.db,
       clientId,
-      projectId
+      projectId,
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'PROJECT_DELETED',
-      resourceType: 'client_project',
+      action: "PROJECT_DELETED",
+      resourceType: "client_project",
       resourceId: projectId,
-      metadata: { clientId }
+      metadata: { clientId },
     });
 
     res.status(200).json({ project: deletedProject });
@@ -459,22 +467,25 @@ async function patchClientProject(req, res, next) {
     const projectId = readProjectId(req);
     const project = await clientsService.updateClientProject({
       db: req.app.locals.db,
+      env: req.app.locals.env,
+      io: req.app.locals.io,
+      actorUserId: req.auth.userId,
       clientId,
       projectId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'PROJECT_UPDATED',
-      resourceType: 'client_project',
+      action: "PROJECT_UPDATED",
+      resourceType: "client_project",
       resourceId: projectId,
       metadata: {
         clientId,
-        updatedFields: Object.keys(req.body || {})
-      }
+        updatedFields: Object.keys(req.body || {}),
+      },
     });
 
     res.status(200).json({ project });
@@ -490,7 +501,7 @@ async function createClientCitation(req, res, next) {
       db: req.app.locals.db,
       actorUserId: req.auth.userId,
       clientId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     res.status(201).json({ citation });
@@ -507,7 +518,7 @@ async function patchClientCitation(req, res, next) {
       db: req.app.locals.db,
       clientId,
       citationId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     res.status(200).json({ citation });
@@ -523,7 +534,7 @@ async function deleteClientCitation(req, res, next) {
     const result = await clientsService.deleteClientCitation({
       db: req.app.locals.db,
       clientId,
-      citationId
+      citationId,
     });
 
     res.status(200).json(result);
@@ -538,8 +549,14 @@ async function listClientProjects(req, res, next) {
     const data = await clientsService.listClientProjects({
       db: req.app.locals.db,
       clientId,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId,
       page: req.query.page,
-      limit: req.query.limit
+      limit: req.query.limit,
+      search: req.query.search,
+      status: req.query.status,
+      clientSuccessManagerId: req.query.clientSuccessManagerId,
+      accountManagerId: req.query.accountManagerId,
     });
 
     res.status(200).json(data);
@@ -574,5 +591,5 @@ module.exports = {
   createClientProject,
   patchClientProject,
   deleteClientProject,
-  listClientProjects
+  listClientProjects,
 };

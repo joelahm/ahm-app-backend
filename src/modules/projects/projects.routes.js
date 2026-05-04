@@ -1,24 +1,31 @@
 const express = require('express');
 const projectsController = require('./projects.controller');
 const { authenticateAccessToken } = require('../../middleware/authenticateAccessToken');
-const { requireRole } = require('../../middleware/requireRole');
+const { requireAnyPermission, requirePermission } = require('../../middleware/requirePermission');
 
 const router = express.Router();
 
 router.use(authenticateAccessToken);
-router.use(requireRole('ADMIN'));
 
-router.get('/list', projectsController.listProjects);
-router.get('/tasks', projectsController.listTasksGroupedByProject);
-router.post('/tasks', projectsController.createProjectTaskFromBody);
-router.patch('/tasks/:taskId', projectsController.updateProjectTask);
-router.delete('/tasks/:taskId', projectsController.deleteProjectTask);
-router.get('/tasks/:taskId/comments', projectsController.listTaskComments);
-router.post('/tasks/:taskId/comments', projectsController.createTaskComment);
-router.delete('/tasks/comments/:commentId', projectsController.deleteTaskComment);
-router.get('/:projectId/comments', projectsController.listProjectComments);
-router.post('/:projectId/comments', projectsController.createProjectComment);
-router.delete('/comments/:commentId', projectsController.deleteProjectComment);
-router.post('/:id/tasks', projectsController.createProjectTask);
+const PROJECT_READ_PERMISSIONS = [
+  'add-new-client',
+  'edit-location-details',
+  'remove-client',
+  're-sync-location',
+  'view-performance-dashboard'
+];
+
+router.get('/list', requireAnyPermission(PROJECT_READ_PERMISSIONS), projectsController.listProjects);
+router.get('/tasks', requireAnyPermission(PROJECT_READ_PERMISSIONS), projectsController.listTasksGroupedByProject);
+router.post('/tasks', requirePermission('edit-location-details'), projectsController.createProjectTaskFromBody);
+router.patch('/tasks/:taskId', requirePermission('edit-location-details'), projectsController.updateProjectTask);
+router.delete('/tasks/:taskId', requirePermission('remove-client'), projectsController.deleteProjectTask);
+router.get('/tasks/:taskId/comments', requireAnyPermission(PROJECT_READ_PERMISSIONS), projectsController.listTaskComments);
+router.post('/tasks/:taskId/comments', requirePermission('edit-location-details'), projectsController.createTaskComment);
+router.delete('/tasks/comments/:commentId', requirePermission('edit-location-details'), projectsController.deleteTaskComment);
+router.get('/:projectId/comments', requireAnyPermission(PROJECT_READ_PERMISSIONS), projectsController.listProjectComments);
+router.post('/:projectId/comments', requirePermission('edit-location-details'), projectsController.createProjectComment);
+router.delete('/comments/:commentId', requirePermission('edit-location-details'), projectsController.deleteProjectComment);
+router.post('/:id/tasks', requirePermission('edit-location-details'), projectsController.createProjectTask);
 
 module.exports = { projectsRouter: router };

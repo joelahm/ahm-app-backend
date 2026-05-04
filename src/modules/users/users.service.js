@@ -1,312 +1,345 @@
-const { AppError } = require('../../lib/errors');
-const { hashPassword } = require('../../lib/password');
-const { verifyPassword } = require('../../lib/password');
-const { generateInviteToken, hashInviteToken } = require('../../lib/inviteToken');
-const { sendInviteEmail } = require('../../lib/mailer');
-const fs = require('fs/promises');
-const path = require('path');
+const { AppError } = require("../../lib/errors");
+const { hashPassword } = require("../../lib/password");
+const { verifyPassword } = require("../../lib/password");
+const {
+  generateInviteToken,
+  hashInviteToken,
+} = require("../../lib/inviteToken");
+const { sendInviteEmail } = require("../../lib/mailer");
+const fs = require("fs/promises");
+const path = require("path");
 
-const ALLOWED_ROLES = new Set(['ADMIN', 'TEAM_MEMBER', 'GUEST']);
-const ALLOWED_STATUS = new Set(['ACTIVE', 'DISABLED', 'LOCKED', 'DELETED']);
+const ALLOWED_ROLES = new Set(["ADMIN", "TEAM_MEMBER", "GUEST"]);
+const ALLOWED_STATUS = new Set(["ACTIVE", "DISABLED", "LOCKED", "DELETED"]);
 const ALLOWED_DEPARTMENTS = new Set([
-  'CSM',
-  'SEO',
-  'Designer',
-  'Web Development',
-  'Operations',
-  'Management'
+  "CSM",
+  "SEO",
+  "Designer",
+  "Web Development",
+  "Operations",
+  "Management",
 ]);
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PERMISSIONS_SETTINGS_KEY = 'workspace_permissions';
+const DISCORD_USER_ID_REGEX = /^\d{15,25}$/;
+const PERMISSIONS_SETTINGS_KEY = "workspace_permissions";
+
+// Returns null for blank input, the trimmed digit-only ID for valid input,
+// throws AppError for non-digit/wrong-length input. Discord snowflakes are
+// 17-20 digits in practice; we allow 15-25 for forward compatibility.
+function parseDiscordUserId(value) {
+  if (value === undefined || value === null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  if (!DISCORD_USER_ID_REGEX.test(trimmed)) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "discordUserId must be a 15-25 digit Discord user ID.",
+    );
+  }
+  return trimmed;
+}
 
 const DEFAULT_PERMISSIONS_SETTINGS = {
   sections: [
     {
-      key: 'user-role-and-permissions',
-      title: 'User Role and Permissions',
+      key: "user-role-and-permissions",
+      title: "User Role and Permissions",
       description:
-        'Control who can manage users, assign roles, and update permission levels within the workspace.',
+        "Control who can manage users, assign roles, and update permission levels within the workspace.",
       hasGuestColumn: false,
       rows: [
         {
-          key: 'add-new-user',
-          title: 'Add New User',
-          description: 'Allow users to invite new users to the workspace',
+          key: "add-new-user",
+          title: "Add New User",
+          description: "Allow users to invite new users to the workspace",
           memberEnabled: false,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'remove-user',
-          title: 'Remove User',
-          description: 'Allow users to remove existing members from the workspace.',
+          key: "remove-user",
+          title: "Remove User",
+          description:
+            "Allow users to remove existing members from the workspace.",
           memberEnabled: false,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'change-user-role',
-          title: 'Change User Role',
-          description: 'Allow users to update roles of existing users.',
+          key: "change-user-role",
+          title: "Change User Role",
+          description: "Allow users to update roles of existing users.",
           memberEnabled: false,
-          adminEnabled: true
-        }
-      ]
+          adminEnabled: true,
+        },
+      ],
     },
     {
-      key: 'gbp-posts',
-      title: 'GBP Posts',
+      key: "gbp-posts",
+      title: "GBP Posts",
       description:
-        'Manage who can view, create, schedule, publish, and edit Google Business Profile posts.',
+        "Manage who can view, create, schedule, publish, and edit Google Business Profile posts.",
       hasGuestColumn: false,
       rows: [
         {
-          key: 'view-posts',
-          title: 'View Posts',
-          description: 'Allow users to view Google Business Profile posts.',
+          key: "view-posts",
+          title: "View Posts",
+          description: "Allow users to view Google Business Profile posts.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'create-draft-posts',
-          title: 'Create Draft Posts',
-          description: 'Allow users to create and save draft posts.',
+          key: "create-draft-posts",
+          title: "Create Draft Posts",
+          description: "Allow users to create and save draft posts.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'schedule-gbp-posts',
-          title: 'Schedule GBP Posts',
-          description: 'Allow users to schedule posts for future publishing.',
+          key: "schedule-gbp-posts",
+          title: "Schedule GBP Posts",
+          description: "Allow users to schedule posts for future publishing.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'publish-immediately',
-          title: 'Publish Immediately',
-          description: 'Allow users to publish posts instantly.',
+          key: "publish-immediately",
+          title: "Publish Immediately",
+          description: "Allow users to publish posts instantly.",
           memberEnabled: false,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'edit-delete-published-posts',
-          title: 'Edit/Delete Published Posts',
-          description: 'Allow users to edit or remove published posts.',
+          key: "edit-delete-published-posts",
+          title: "Edit/Delete Published Posts",
+          description: "Allow users to edit or remove published posts.",
           memberEnabled: false,
-          adminEnabled: true
-        }
-      ]
+          adminEnabled: true,
+        },
+      ],
     },
     {
-      key: 'google-reviews',
-      title: 'Google Reviews',
+      key: "google-reviews",
+      title: "Google Reviews",
       description:
-        'Control access to viewing, replying to, and managing Google reviews and reply templates.',
+        "Control access to viewing, replying to, and managing Google reviews and reply templates.",
       hasGuestColumn: false,
       rows: [
         {
-          key: 'reply-to-reviews',
-          title: 'Reply To Reviews',
-          description: 'Allow users to respond to customer reviews.',
+          key: "reply-to-reviews",
+          title: "Reply To Reviews",
+          description: "Allow users to respond to customer reviews.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'use-reply-templates',
-          title: 'Use Reply Templates',
-          description: 'Allow users to use pre-saved reply templates.',
+          key: "use-reply-templates",
+          title: "Use Reply Templates",
+          description: "Allow users to use pre-saved reply templates.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'manage-review-templates',
-          title: 'Manage Review Templates',
-          description: 'Allow users to create, edit, and manage review reply templates.',
+          key: "manage-review-templates",
+          title: "Manage Review Templates",
+          description:
+            "Allow users to create, edit, and manage review reply templates.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'manage-ai-auto-reply',
-          title: 'Manage AI Auto-Reply',
-          description: 'Allow users to configure and manage AI-powered automatic replies.',
+          key: "manage-ai-auto-reply",
+          title: "Manage AI Auto-Reply",
+          description:
+            "Allow users to configure and manage AI-powered automatic replies.",
           memberEnabled: false,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'delete-replies',
-          title: 'Delete Replies',
-          description: 'Allow users to remove published review replies.',
+          key: "delete-replies",
+          title: "Delete Replies",
+          description: "Allow users to remove published review replies.",
           memberEnabled: false,
-          adminEnabled: true
-        }
-      ]
+          adminEnabled: true,
+        },
+      ],
     },
     {
-      key: 'local-rank-scanner',
-      title: 'Local Rank Scanner',
-      description: 'Manage access to scans, results, and reports.',
+      key: "local-rank-scanner",
+      title: "Local Rank Scanner",
+      description: "Manage access to scans, results, and reports.",
       hasGuestColumn: false,
       rows: [
         {
-          key: 'local-rank-scanner-access',
-          title: 'Local Rank Scanner Access',
-          description: 'Allow users to access the Local Rank Scanner feature.',
+          key: "local-rank-scanner-access",
+          title: "Local Rank Scanner Access",
+          description: "Allow users to access the Local Rank Scanner feature.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'view-scan-results',
-          title: 'View Scan Results',
-          description: 'Allow users to view local ranking scan results and historical data.',
+          key: "view-scan-results",
+          title: "View Scan Results",
+          description:
+            "Allow users to view local ranking scan results and historical data.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'run-quick-scans',
-          title: 'Run Quick Scans',
-          description: 'Allow users to run one-time local rank scans.',
+          key: "run-quick-scans",
+          title: "Run Quick Scans",
+          description: "Allow users to run one-time local rank scans.",
           memberEnabled: false,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'run-recurring-scans',
-          title: 'Run Recurring Scans',
-          description: 'Allow users to schedule and run automated recurring rank scans.',
+          key: "run-recurring-scans",
+          title: "Run Recurring Scans",
+          description:
+            "Allow users to schedule and run automated recurring rank scans.",
           memberEnabled: false,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'export-scan-reports',
-          title: 'Export Scan Reports',
-          description: 'Allow users to export local rank scan reports for sharing or analysis.',
+          key: "export-scan-reports",
+          title: "Export Scan Reports",
+          description:
+            "Allow users to export local rank scan reports for sharing or analysis.",
           memberEnabled: false,
-          adminEnabled: true
-        }
-      ]
+          adminEnabled: true,
+        },
+      ],
     },
     {
-      key: 'schema-generator',
-      title: 'Schema Generator',
+      key: "schema-generator",
+      title: "Schema Generator",
       description:
-        'Manage access to the Schema Generator module, including creating, editing, and exporting schema markup.',
+        "Manage access to the Schema Generator module, including creating, editing, and exporting schema markup.",
       hasGuestColumn: true,
       rows: [
         {
-          key: 'schema-generator-access',
-          title: 'Schema Generator Access',
-          description: 'Allow users to access and view the Schema Generator feature',
+          key: "schema-generator-access",
+          title: "Schema Generator Access",
+          description:
+            "Allow users to access and view the Schema Generator feature",
           guestEnabled: true,
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'generate-schema',
-          title: 'Generate schema',
-          description: 'Allow users to create new schema markup.',
+          key: "generate-schema",
+          title: "Generate schema",
+          description: "Allow users to create new schema markup.",
           guestEnabled: false,
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'edit-schema',
-          title: 'Edit schema',
-          description: 'Allow users to modify existing schema markup.',
+          key: "edit-schema",
+          title: "Edit schema",
+          description: "Allow users to modify existing schema markup.",
           guestEnabled: false,
           memberEnabled: false,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'export-json',
-          title: 'Export JSON',
-          description: 'Allow users to export schema markup in JSON format.',
+          key: "export-json",
+          title: "Export JSON",
+          description: "Allow users to export schema markup in JSON format.",
           guestEnabled: false,
           memberEnabled: true,
-          adminEnabled: true
-        }
-      ]
+          adminEnabled: true,
+        },
+      ],
     },
     {
-      key: 'directory-listing',
-      title: 'Directory Listing',
+      key: "directory-listing",
+      title: "Directory Listing",
       description:
-        'Control permissions for managing business listings, citations, and directory submissions.',
+        "Control permissions for managing business listings, citations, and directory submissions.",
       hasGuestColumn: true,
       rows: [
         {
-          key: 'edit-location-information',
-          title: 'Edit Location Information',
-          description: 'Allow users to edit business location details used for directory and citation listings.',
+          key: "edit-location-information",
+          title: "Edit Location Information",
+          description:
+            "Allow users to edit business location details used for directory and citation listings.",
           guestEnabled: true,
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'delete-archive-listings',
-          title: 'Delete / Archive Listings',
-          description: 'Allow users to delete or archive existing directory listings.',
+          key: "delete-archive-listings",
+          title: "Delete / Archive Listings",
+          description:
+            "Allow users to delete or archive existing directory listings.",
           guestEnabled: false,
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'export-reporting',
-          title: 'Export Reporting',
-          description: 'Allow users to export directory listing reports and status summaries.',
+          key: "export-reporting",
+          title: "Export Reporting",
+          description:
+            "Allow users to export directory listing reports and status summaries.",
           guestEnabled: false,
           memberEnabled: false,
-          adminEnabled: true
-        }
-      ]
+          adminEnabled: true,
+        },
+      ],
     },
     {
-      key: 'client-management-permissions',
-      title: 'Client Management Permissions',
+      key: "client-management-permissions",
+      title: "Client Management Permissions",
       description:
-        'Manage access to business locations, including viewing, editing, syncing, and performance insights.',
+        "Manage access to business locations, including viewing, editing, syncing, and performance insights.",
       hasGuestColumn: false,
       rows: [
         {
-          key: 'add-new-client',
-          title: 'Add New Client',
-          description: 'Allow users to add and connect new business locations.',
+          key: "add-new-client",
+          title: "Add New Client",
+          description: "Allow users to add and connect new business locations.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'edit-location-details',
-          title: 'Edit Location Details (NAP, Category, Services)',
+          key: "edit-location-details",
+          title: "Edit Location Details (NAP, Category, Services)",
           description:
-            'Allow users to update assigned location information including categories, services, and business details.',
+            "Allow users to update assigned location information including categories, services, and business details.",
           memberEnabled: false,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 'remove-client',
-          title: 'Remove Client',
-          description: 'Allow users to permanently remove assigned location from the workspace.',
+          key: "remove-client",
+          title: "Remove Client",
+          description:
+            "Allow users to permanently remove assigned location from the workspace.",
           memberEnabled: true,
-          adminEnabled: true
+          adminEnabled: true,
         },
         {
-          key: 're-sync-location',
-          title: 'Re-Sync Location',
-          description: 'Allow users to refresh and re-sync assigned location data from Google Business Profile.',
-          memberEnabled: false,
-          adminEnabled: true
-        },
-        {
-          key: 'view-performance-dashboard',
-          title: 'View Performance Dashboard',
+          key: "re-sync-location",
+          title: "Re-Sync Location",
           description:
-            'Allow users to view analytics, rankings, and performance insights for assigned locations',
+            "Allow users to refresh and re-sync assigned location data from Google Business Profile.",
           memberEnabled: false,
-          adminEnabled: true
-        }
-      ]
-    }
-  ]
+          adminEnabled: true,
+        },
+        {
+          key: "view-performance-dashboard",
+          title: "View Performance Dashboard",
+          description:
+            "Allow users to view analytics, rankings, and performance insights for assigned locations",
+          memberEnabled: false,
+          adminEnabled: true,
+        },
+      ],
+    },
+  ],
 };
 
 function isUniqueViolation(err) {
-  return err && err.code === 'P2002';
+  return err && err.code === "P2002";
 }
 
 function cloneDefaultPermissionsSettings() {
@@ -314,45 +347,55 @@ function cloneDefaultPermissionsSettings() {
 }
 
 function normalizePermissionRow(section, row) {
-  if (typeof row !== 'object' || row === null) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid permission row.');
+  if (typeof row !== "object" || row === null) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid permission row.");
   }
 
   return {
-    key: String(row.key || '').trim(),
-    title: String(row.title || '').trim(),
-    description: String(row.description || '').trim(),
-    ...(section.hasGuestColumn ? { guestEnabled: Boolean(row.guestEnabled) } : {}),
+    key: String(row.key || "").trim(),
+    title: String(row.title || "").trim(),
+    description: String(row.description || "").trim(),
+    ...(section.hasGuestColumn
+      ? { guestEnabled: Boolean(row.guestEnabled) }
+      : {}),
     memberEnabled: Boolean(row.memberEnabled),
-    adminEnabled: true
+    adminEnabled: true,
   };
 }
 
 function normalizePermissionSection(section) {
-  if (typeof section !== 'object' || section === null) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid permission section.');
+  if (typeof section !== "object" || section === null) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid permission section.");
   }
 
-  const rows = Array.isArray(section.rows) ? section.rows.map((row) => normalizePermissionRow(section, row)) : [];
+  const rows = Array.isArray(section.rows)
+    ? section.rows.map((row) => normalizePermissionRow(section, row))
+    : [];
 
   if (!rows.length) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Permission sections must include rows.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "Permission sections must include rows.",
+    );
   }
 
   return {
-    key: String(section.key || '').trim(),
-    title: String(section.title || '').trim(),
-    description: String(section.description || '').trim(),
+    key: String(section.key || "").trim(),
+    title: String(section.title || "").trim(),
+    description: String(section.description || "").trim(),
     hasGuestColumn: Boolean(section.hasGuestColumn),
-    rows
+    rows,
   };
 }
 
 function normalizePermissionsPayload(payload) {
-  const sections = Array.isArray(payload?.sections) ? payload.sections.map(normalizePermissionSection) : null;
+  const sections = Array.isArray(payload?.sections)
+    ? payload.sections.map(normalizePermissionSection)
+    : null;
 
   if (!sections || !sections.length) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'sections is required.');
+    throw new AppError(400, "VALIDATION_ERROR", "sections is required.");
   }
 
   return { sections };
@@ -363,7 +406,7 @@ function parseStoredPermissionsValue(rawValue) {
     return cloneDefaultPermissionsSettings();
   }
 
-  if (typeof rawValue === 'string') {
+  if (typeof rawValue === "string") {
     try {
       return normalizePermissionsPayload(JSON.parse(rawValue));
     } catch (_error) {
@@ -388,16 +431,18 @@ function mapUserSummary(user) {
     department: user.department ?? null,
     phoneNumber: user.phoneNumber ?? null,
     country: user.country ?? null,
+    discordUserId: user.discordUserId ?? null,
     createdAt: user.createdAt,
-    updatedAt: user.updatedAt
+    updatedAt: user.updatedAt,
   };
 }
 
 function buildArchivedUserEmail(email, userId) {
-  const local = String(email || '')
-    .split('@')[0]
-    .replace(/[^a-zA-Z0-9._-]/g, '')
-    .toLowerCase() || 'user';
+  const local =
+    String(email || "")
+      .split("@")[0]
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase() || "user";
   const suffix = `${Date.now()}-${String(userId)}`;
   return `${local}+deleted-${suffix}@archived.local`;
 }
@@ -409,16 +454,16 @@ function parseInvitationLocations(locationsJson) {
 
   if (Array.isArray(locationsJson)) {
     return locationsJson
-      .map((location) => String(location || '').trim())
+      .map((location) => String(location || "").trim())
       .filter(Boolean);
   }
 
-  if (typeof locationsJson === 'string') {
+  if (typeof locationsJson === "string") {
     try {
       const parsed = JSON.parse(locationsJson);
       if (Array.isArray(parsed)) {
         return parsed
-          .map((location) => String(location || '').trim())
+          .map((location) => String(location || "").trim())
           .filter(Boolean);
       }
     } catch (_error) {
@@ -434,16 +479,24 @@ async function listUsers({ db, page = 1, limit = 20 }) {
   const usersLimit = Number(limit);
 
   if (!Number.isInteger(usersPage) || usersPage <= 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'page must be a positive integer.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "page must be a positive integer.",
+    );
   }
   if (!Number.isInteger(usersLimit) || usersLimit <= 0 || usersLimit > 100) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'limit must be an integer between 1 and 100.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "limit must be an integer between 1 and 100.",
+    );
   }
 
   const skip = (usersPage - 1) * usersLimit;
   const activeFilter = {
-    status: 'ACTIVE',
-    isActive: true
+    status: "ACTIVE",
+    isActive: true,
   };
   const [total, users] = await Promise.all([
     db.user.count({ where: activeFilter }),
@@ -451,7 +504,7 @@ async function listUsers({ db, page = 1, limit = 20 }) {
       where: activeFilter,
       skip,
       take: usersLimit,
-      orderBy: { id: 'asc' },
+      orderBy: { id: "asc" },
       select: {
         id: true,
         email: true,
@@ -465,10 +518,11 @@ async function listUsers({ db, page = 1, limit = 20 }) {
         department: true,
         phoneNumber: true,
         country: true,
+        discordUserId: true,
         createdAt: true,
-        updatedAt: true
-      }
-    })
+        updatedAt: true,
+      },
+    }),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / usersLimit));
@@ -485,8 +539,8 @@ async function listUsers({ db, page = 1, limit = 20 }) {
       hasPrev,
       hasNext,
       prevPage: hasPrev ? usersPage - 1 : null,
-      nextPage: hasNext ? usersPage + 1 : null
-    }
+      nextPage: hasNext ? usersPage + 1 : null,
+    },
   };
 }
 
@@ -514,51 +568,213 @@ async function listPendingInvitations({ db }) {
 
   const invitations = rows.map((row) => {
     const invitedByName = [row.invited_by_first_name, row.invited_by_last_name]
-      .map((value) => String(value || '').trim())
+      .map((value) => String(value || "").trim())
       .filter(Boolean)
-      .join(' ')
+      .join(" ")
       .trim();
 
     return {
       id: Number(row.id),
-      email: String(row.email || '').trim(),
-      role: String(row.role_code || '').trim().toUpperCase(),
+      email: String(row.email || "").trim(),
+      role: String(row.role_code || "")
+        .trim()
+        .toUpperCase(),
       locations: parseInvitationLocations(row.locations_json),
-      status: String(row.status || '').trim().toUpperCase(),
+      status: String(row.status || "")
+        .trim()
+        .toUpperCase(),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       sentAt: row.sent_at,
       expiresAt: row.expires_at,
-      invitedBy: invitedByName || String(row.invited_by_email || '').trim() || null
+      invitedBy:
+        invitedByName || String(row.invited_by_email || "").trim() || null,
     };
   });
 
   return {
-    invitations
+    invitations,
   };
 }
 
-async function listActivityLogs({
-  db,
-  page = 1,
-  limit = 20,
-  actorUserId
-}) {
+function isSuperadminEmail(email, env) {
+  const superadminUsers = Array.isArray(env?.superadminUsers)
+    ? env.superadminUsers
+    : [];
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
+
+  return Boolean(normalizedEmail && superadminUsers.includes(normalizedEmail));
+}
+
+async function isSuperadminUser({ db, env, userId }) {
+  const user = await db.user.findUnique({
+    where: { id: BigInt(userId) },
+    select: { email: true, status: true, isActive: true },
+  });
+
+  if (
+    !user ||
+    !user.isActive ||
+    String(user.status || "")
+      .trim()
+      .toUpperCase() === "DELETED"
+  ) {
+    return false;
+  }
+
+  return isSuperadminEmail(user.email, env);
+}
+
+async function cancelPendingInvitation({ db, invitationId }) {
+  const id = Number(invitationId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid invitation id.");
+  }
+
+  const invitation = await db.userInvitation.findUnique({
+    where: { id: BigInt(id) },
+    select: { id: true, email: true, status: true },
+  });
+
+  if (!invitation) {
+    throw new AppError(404, "NOT_FOUND", "Invitation not found.");
+  }
+
+  if (
+    String(invitation.status || "")
+      .trim()
+      .toUpperCase() !== "PENDING"
+  ) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "Only pending invitations can be cancelled.",
+    );
+  }
+
+  await db.userInvitation.delete({
+    where: { id: BigInt(id) },
+  });
+
+  return {
+    email: invitation.email,
+    success: true,
+  };
+}
+
+async function resendPendingInvitation({ db, env, invitationId }) {
+  const id = Number(invitationId);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid invitation id.");
+  }
+
+  if (!env.invite.baseUrl) {
+    throw new AppError(
+      500,
+      "INVITE_CONFIG_ERROR",
+      "INVITE_BASE_URL (or APP_BASE_URL) is required.",
+    );
+  }
+
+  const invitation = await db.userInvitation.findUnique({
+    where: { id: BigInt(id) },
+    select: { id: true, email: true, roleCode: true, status: true },
+  });
+
+  if (!invitation) {
+    throw new AppError(404, "NOT_FOUND", "Invitation not found.");
+  }
+
+  if (
+    String(invitation.status || "")
+      .trim()
+      .toUpperCase() !== "PENDING"
+  ) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "Only pending invitations can be resent.",
+    );
+  }
+
+  const token = generateInviteToken();
+  const tokenHash = hashInviteToken(token);
+  const expiresAt = new Date(
+    Date.now() + env.invite.expiresInHours * 60 * 60 * 1000,
+  );
+  const inviteUrl = `${env.invite.baseUrl.replace(/\/$/, "")}?token=${encodeURIComponent(token)}`;
+
+  await db.userInvitation.update({
+    where: { id: BigInt(id) },
+    data: {
+      expiresAt,
+      sentAt: null,
+      tokenHash,
+    },
+  });
+
+  try {
+    await sendInviteEmail({
+      env,
+      inviteUrl,
+      role: invitation.roleCode,
+      to: invitation.email,
+    });
+
+    await db.userInvitation.update({
+      where: { id: BigInt(id) },
+      data: {
+        sentAt: new Date(),
+      },
+    });
+  } catch (error) {
+    throw new AppError(
+      500,
+      "INVITE_SEND_ERROR",
+      "Failed to resend invite email.",
+    );
+  }
+
+  return {
+    email: invitation.email,
+    success: true,
+  };
+}
+
+async function listActivityLogs({ db, page = 1, limit = 20, actorUserId }) {
   const activityPage = Number(page);
   const activityLimit = Number(limit);
 
   if (!Number.isInteger(activityPage) || activityPage <= 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'page must be a positive integer.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "page must be a positive integer.",
+    );
   }
-  if (!Number.isInteger(activityLimit) || activityLimit <= 0 || activityLimit > 100) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'limit must be an integer between 1 and 100.');
+  if (
+    !Number.isInteger(activityLimit) ||
+    activityLimit <= 0 ||
+    activityLimit > 100
+  ) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "limit must be an integer between 1 and 100.",
+    );
   }
 
   const where = {};
-  if (actorUserId !== undefined && actorUserId !== null && actorUserId !== '') {
+  if (actorUserId !== undefined && actorUserId !== null && actorUserId !== "") {
     const parsedActorId = Number(actorUserId);
     if (!Number.isInteger(parsedActorId) || parsedActorId <= 0) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'actorUserId must be a positive integer.');
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "actorUserId must be a positive integer.",
+      );
     }
     where.actorUserId = BigInt(parsedActorId);
   }
@@ -570,18 +786,18 @@ async function listActivityLogs({
       where,
       skip,
       take: activityLimit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       include: {
         actor: {
           select: {
             id: true,
             email: true,
             firstName: true,
-            lastName: true
-          }
-        }
-      }
-    })
+            lastName: true,
+          },
+        },
+      },
+    }),
   ]);
 
   const totalPages = Math.max(1, Math.ceil(total / activityLimit));
@@ -590,9 +806,9 @@ async function listActivityLogs({
 
   const activityLogs = logs.map((log) => {
     const actorName = [log.actor?.firstName, log.actor?.lastName]
-      .map((value) => String(value || '').trim())
+      .map((value) => String(value || "").trim())
       .filter(Boolean)
-      .join(' ')
+      .join(" ")
       .trim();
 
     return {
@@ -600,12 +816,12 @@ async function listActivityLogs({
       actorUserId: log.actorUserId ? Number(log.actorUserId) : null,
       actor: log.actor
         ? {
-          id: Number(log.actor.id),
-          email: log.actor.email,
-          firstName: log.actor.firstName ?? null,
-          lastName: log.actor.lastName ?? null,
-          name: actorName || log.actor.email
-        }
+            id: Number(log.actor.id),
+            email: log.actor.email,
+            firstName: log.actor.firstName ?? null,
+            lastName: log.actor.lastName ?? null,
+            name: actorName || log.actor.email,
+          }
         : null,
       action: log.action,
       resourceType: log.resourceType,
@@ -614,7 +830,7 @@ async function listActivityLogs({
       ipAddress: log.ipAddress ?? null,
       userAgent: log.userAgent ?? null,
       metadata: log.metadata ?? null,
-      createdAt: log.createdAt
+      createdAt: log.createdAt,
     };
   });
 
@@ -628,22 +844,28 @@ async function listActivityLogs({
       hasPrev,
       hasNext,
       prevPage: hasPrev ? activityPage - 1 : null,
-      nextPage: hasNext ? activityPage + 1 : null
-    }
+      nextPage: hasNext ? activityPage + 1 : null,
+    },
   };
 }
 
 async function createUser({ db, actorUserId, payload }) {
-  const email = String(payload.email || '').toLowerCase().trim();
+  const email = String(payload.email || "")
+    .toLowerCase()
+    .trim();
   const password = payload.password;
-  const role = normalizeRole(payload.role || 'GUEST');
+  const role = normalizeRole(payload.role || "GUEST");
 
   if (!email || !password) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'email and password are required.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "email and password are required.",
+    );
   }
 
   if (!ALLOWED_ROLES.has(role)) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid role value.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid role value.");
   }
 
   const passwordHash = await hashPassword(password);
@@ -656,17 +878,19 @@ async function createUser({ db, actorUserId, payload }) {
         roleCode: role,
         firstName: payload.firstName || null,
         lastName: payload.lastName || null,
-        status: payload.status || 'ACTIVE',
-        isActive: payload.isActive === undefined ? true : Boolean(payload.isActive),
-        createdBy: BigInt(actorUserId)
+        discordUserId: parseDiscordUserId(payload.discordUserId),
+        status: payload.status || "ACTIVE",
+        isActive:
+          payload.isActive === undefined ? true : Boolean(payload.isActive),
+        createdBy: BigInt(actorUserId),
       },
       select: {
         id: true,
         email: true,
         roleCode: true,
         status: true,
-        isActive: true
-      }
+        isActive: true,
+      },
     });
 
     return {
@@ -674,11 +898,11 @@ async function createUser({ db, actorUserId, payload }) {
       email: user.email,
       role: user.roleCode,
       status: user.status,
-      isActive: user.isActive
+      isActive: user.isActive,
     };
   } catch (err) {
     if (isUniqueViolation(err)) {
-      throw new AppError(409, 'EMAIL_ALREADY_EXISTS', 'Email already exists.');
+      throw new AppError(409, "EMAIL_ALREADY_EXISTS", "Email already exists.");
     }
     throw err;
   }
@@ -693,13 +917,13 @@ async function updateUser({ db, userId, payload }) {
   if (payload.role !== undefined) {
     const normalizedRole = normalizeRole(payload.role);
     if (!ALLOWED_ROLES.has(normalizedRole)) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid role value.');
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid role value.");
     }
     patch.roleCode = normalizedRole;
   }
   if (payload.status !== undefined) {
     if (!ALLOWED_STATUS.has(payload.status)) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid status value.');
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid status value.");
     }
     patch.status = payload.status;
   }
@@ -713,8 +937,12 @@ async function updateUser({ db, userId, payload }) {
     patch.title = payload.title;
   }
   if (payload.department !== undefined) {
-    if (payload.department !== null && payload.department !== '' && !ALLOWED_DEPARTMENTS.has(payload.department)) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid department value.');
+    if (
+      payload.department !== null &&
+      payload.department !== "" &&
+      !ALLOWED_DEPARTMENTS.has(payload.department)
+    ) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid department value.");
     }
     patch.department = payload.department;
   }
@@ -724,26 +952,33 @@ async function updateUser({ db, userId, payload }) {
   if (payload.country !== undefined) {
     patch.country = payload.country;
   }
+  if (payload.discordUserId !== undefined) {
+    patch.discordUserId = parseDiscordUserId(payload.discordUserId);
+  }
   if (payload.isActive !== undefined) {
     patch.isActive = Boolean(payload.isActive);
   }
 
   const keys = Object.keys(patch);
   if (!keys.length) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'No supported fields to update.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "No supported fields to update.",
+    );
   }
 
   try {
     await db.user.update({
       where: { id: BigInt(userId) },
-      data: patch
+      data: patch,
     });
   } catch (err) {
     if (isUniqueViolation(err)) {
-      throw new AppError(409, 'EMAIL_ALREADY_EXISTS', 'Email already exists.');
+      throw new AppError(409, "EMAIL_ALREADY_EXISTS", "Email already exists.");
     }
-    if (err.code === 'P2025') {
-      throw new AppError(404, 'NOT_FOUND', 'User not found.');
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "User not found.");
     }
     throw err;
   }
@@ -766,8 +1001,12 @@ async function updateOwnProfile({ db, userId, payload }) {
     patch.title = payload.title;
   }
   if (payload.department !== undefined) {
-    if (payload.department !== null && payload.department !== '' && !ALLOWED_DEPARTMENTS.has(payload.department)) {
-      throw new AppError(400, 'VALIDATION_ERROR', 'Invalid department value.');
+    if (
+      payload.department !== null &&
+      payload.department !== "" &&
+      !ALLOWED_DEPARTMENTS.has(payload.department)
+    ) {
+      throw new AppError(400, "VALIDATION_ERROR", "Invalid department value.");
     }
     patch.department = payload.department;
   }
@@ -777,15 +1016,22 @@ async function updateOwnProfile({ db, userId, payload }) {
   if (payload.country !== undefined) {
     patch.country = payload.country;
   }
+  if (payload.discordUserId !== undefined) {
+    patch.discordUserId = parseDiscordUserId(payload.discordUserId);
+  }
   if (payload.filePath) {
-    const normalizedPath = String(payload.filePath).replace(/\\/g, '/');
-    const publicPrefix = `${process.cwd().replace(/\\/g, '/')}/public/`;
+    const normalizedPath = String(payload.filePath).replace(/\\/g, "/");
+    const publicPrefix = `${process.cwd().replace(/\\/g, "/")}/public/`;
     const relative = normalizedPath.startsWith(publicPrefix)
       ? normalizedPath.slice(publicPrefix.length)
-      : normalizedPath.split('/public/')[1];
+      : normalizedPath.split("/public/")[1];
 
     if (!relative) {
-      throw new AppError(500, 'UPLOAD_ERROR', 'Could not determine uploaded file path.');
+      throw new AppError(
+        500,
+        "UPLOAD_ERROR",
+        "Could not determine uploaded file path.",
+      );
     }
 
     nextAvatarUrl = `/${relative}`;
@@ -794,33 +1040,46 @@ async function updateOwnProfile({ db, userId, payload }) {
 
   const keys = Object.keys(patch);
   if (!keys.length) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'No supported fields to update.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "No supported fields to update.",
+    );
   }
 
   try {
     const previous = nextAvatarUrl
       ? await db.user.findUnique({
-        where: { id: BigInt(userId) },
-        select: { avatarUrl: true }
-      })
+          where: { id: BigInt(userId) },
+          select: { avatarUrl: true },
+        })
       : null;
     const previousAvatarUrl = previous?.avatarUrl || null;
 
     await db.user.update({
       where: { id: BigInt(userId) },
-      data: patch
+      data: patch,
     });
 
-    if (nextAvatarUrl && previousAvatarUrl && previousAvatarUrl !== nextAvatarUrl && previousAvatarUrl.startsWith('/uploads/avatars/')) {
-      const oldFilePath = path.join(process.cwd(), 'public', previousAvatarUrl.replace(/^\//, ''));
+    if (
+      nextAvatarUrl &&
+      previousAvatarUrl &&
+      previousAvatarUrl !== nextAvatarUrl &&
+      previousAvatarUrl.startsWith("/uploads/avatars/")
+    ) {
+      const oldFilePath = path.join(
+        process.cwd(),
+        "public",
+        previousAvatarUrl.replace(/^\//, ""),
+      );
       fs.unlink(oldFilePath).catch(() => {});
     }
   } catch (err) {
     if (isUniqueViolation(err)) {
-      throw new AppError(409, 'EMAIL_ALREADY_EXISTS', 'Email already exists.');
+      throw new AppError(409, "EMAIL_ALREADY_EXISTS", "Email already exists.");
     }
-    if (err.code === 'P2025') {
-      throw new AppError(404, 'NOT_FOUND', 'User not found.');
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "User not found.");
     }
     throw err;
   }
@@ -831,17 +1090,17 @@ async function updateOwnProfile({ db, userId, payload }) {
 async function updateUserRole({ db, userId, role }) {
   const nextRole = normalizeRole(role);
   if (!ALLOWED_ROLES.has(nextRole)) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid role value.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid role value.");
   }
 
   try {
     await db.user.update({
       where: { id: BigInt(userId) },
-      data: { roleCode: nextRole }
+      data: { roleCode: nextRole },
     });
   } catch (err) {
-    if (err.code === 'P2025') {
-      throw new AppError(404, 'NOT_FOUND', 'User not found.');
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "User not found.");
     }
     throw err;
   }
@@ -851,7 +1110,11 @@ async function updateUserRole({ db, userId, role }) {
 
 async function updatePassword({ db, userId, newPassword }) {
   if (!newPassword || String(newPassword).length < 10) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Password must be at least 10 characters.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "Password must be at least 10 characters.",
+    );
   }
 
   const passwordHash = await hashPassword(newPassword);
@@ -861,12 +1124,12 @@ async function updatePassword({ db, userId, newPassword }) {
       where: { id: BigInt(userId) },
       data: {
         passwordHash,
-        passwordChangedAt: new Date()
-      }
+        passwordChangedAt: new Date(),
+      },
     });
   } catch (err) {
-    if (err.code === 'P2025') {
-      throw new AppError(404, 'NOT_FOUND', 'User not found.');
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "User not found.");
     }
     throw err;
   }
@@ -876,36 +1139,53 @@ async function updatePassword({ db, userId, newPassword }) {
     data: {
       isRevoked: true,
       revokedAt: new Date(),
-      revokedReason: 'PASSWORD_CHANGED'
-    }
+      revokedReason: "PASSWORD_CHANGED",
+    },
   });
 }
 
-async function changeOwnPassword({ db, userId, currentPassword, newPassword, confirmPassword }) {
+async function changeOwnPassword({
+  db,
+  userId,
+  currentPassword,
+  newPassword,
+  confirmPassword,
+}) {
   if (!currentPassword || !newPassword || !confirmPassword) {
     throw new AppError(
       400,
-      'VALIDATION_ERROR',
-      'currentPassword, newPassword and confirmPassword are required.'
+      "VALIDATION_ERROR",
+      "currentPassword, newPassword and confirmPassword are required.",
     );
   }
 
   if (newPassword !== confirmPassword) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'newPassword and confirmPassword must match.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "newPassword and confirmPassword must match.",
+    );
   }
 
   const user = await db.user.findUnique({
     where: { id: BigInt(userId) },
-    select: { passwordHash: true }
+    select: { passwordHash: true },
   });
 
   if (!user || !user.passwordHash) {
-    throw new AppError(404, 'NOT_FOUND', 'User not found.');
+    throw new AppError(404, "NOT_FOUND", "User not found.");
   }
 
-  const validCurrentPassword = await verifyPassword(currentPassword, user.passwordHash);
+  const validCurrentPassword = await verifyPassword(
+    currentPassword,
+    user.passwordHash,
+  );
   if (!validCurrentPassword) {
-    throw new AppError(401, 'INVALID_CREDENTIALS', 'Current password is incorrect.');
+    throw new AppError(
+      401,
+      "INVALID_CREDENTIALS",
+      "Current password is incorrect.",
+    );
   }
 
   await updatePassword({ db, userId, newPassword });
@@ -914,17 +1194,21 @@ async function changeOwnPassword({ db, userId, currentPassword, newPassword, con
 
 async function updateAvatar({ db, userId, filePath }) {
   if (!filePath) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'avatar file is required.');
+    throw new AppError(400, "VALIDATION_ERROR", "avatar file is required.");
   }
 
-  const normalizedPath = String(filePath).replace(/\\/g, '/');
-  const publicPrefix = `${process.cwd().replace(/\\/g, '/')}/public/`;
+  const normalizedPath = String(filePath).replace(/\\/g, "/");
+  const publicPrefix = `${process.cwd().replace(/\\/g, "/")}/public/`;
   const relative = normalizedPath.startsWith(publicPrefix)
     ? normalizedPath.slice(publicPrefix.length)
-    : normalizedPath.split('/public/')[1];
+    : normalizedPath.split("/public/")[1];
 
   if (!relative) {
-    throw new AppError(500, 'UPLOAD_ERROR', 'Could not determine uploaded file path.');
+    throw new AppError(
+      500,
+      "UPLOAD_ERROR",
+      "Could not determine uploaded file path.",
+    );
   }
 
   const avatarUrl = `/${relative}`;
@@ -932,7 +1216,7 @@ async function updateAvatar({ db, userId, filePath }) {
   try {
     const previous = await db.user.findUnique({
       where: { id: BigInt(userId) },
-      select: { avatarUrl: true }
+      select: { avatarUrl: true },
     });
     const previousAvatarUrl = previous?.avatarUrl || null;
 
@@ -953,19 +1237,27 @@ async function updateAvatar({ db, userId, filePath }) {
         phoneNumber: true,
         country: true,
         createdAt: true,
-        updatedAt: true
-      }
+        updatedAt: true,
+      },
     });
 
-    if (previousAvatarUrl && previousAvatarUrl !== avatarUrl && previousAvatarUrl.startsWith('/uploads/avatars/')) {
-      const oldFilePath = path.join(process.cwd(), 'public', previousAvatarUrl.replace(/^\//, ''));
+    if (
+      previousAvatarUrl &&
+      previousAvatarUrl !== avatarUrl &&
+      previousAvatarUrl.startsWith("/uploads/avatars/")
+    ) {
+      const oldFilePath = path.join(
+        process.cwd(),
+        "public",
+        previousAvatarUrl.replace(/^\//, ""),
+      );
       fs.unlink(oldFilePath).catch(() => {});
     }
 
     return mapUserSummary(updated);
   } catch (err) {
-    if (err.code === 'P2025') {
-      throw new AppError(404, 'NOT_FOUND', 'User not found.');
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "User not found.");
     }
     throw err;
   }
@@ -976,13 +1268,13 @@ async function softDeleteUser({ db, userId }) {
     await db.user.update({
       where: { id: BigInt(userId) },
       data: {
-        status: 'DELETED',
-        isActive: false
-      }
+        status: "DELETED",
+        isActive: false,
+      },
     });
   } catch (err) {
-    if (err.code === 'P2025') {
-      throw new AppError(404, 'NOT_FOUND', 'User not found.');
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "User not found.");
     }
     throw err;
   }
@@ -992,8 +1284,8 @@ async function softDeleteUser({ db, userId }) {
     data: {
       isRevoked: true,
       revokedAt: new Date(),
-      revokedReason: 'USER_SOFT_DELETED'
-    }
+      revokedReason: "USER_SOFT_DELETED",
+    },
   });
 
   return { success: true };
@@ -1002,8 +1294,10 @@ async function softDeleteUser({ db, userId }) {
 function normalizeMembers(memberList) {
   const mapped = memberList
     .map((member) => ({
-      email: String(member?.email || '').trim().toLowerCase(),
-      role: normalizeRole(member?.role || 'GUEST')
+      email: String(member?.email || "")
+        .trim()
+        .toLowerCase(),
+      role: normalizeRole(member?.role || "GUEST"),
     }))
     .filter((member) => member.email);
 
@@ -1019,21 +1313,22 @@ function normalizeMembers(memberList) {
 }
 
 function normalizeRole(roleValue) {
-  const cleaned = String(roleValue || '')
+  const cleaned = String(roleValue || "")
     .trim()
     .toUpperCase()
-    .replace(/[\s-]+/g, '_');
+    .replace(/[\s-]+/g, "_");
 
-  if (cleaned === 'TEAM_MEMBER' || cleaned === 'TEAMMEMBER') return 'TEAM_MEMBER';
-  if (cleaned === 'MEMBER') return 'TEAM_MEMBER';
-  if (cleaned === 'ADMIN') return 'ADMIN';
-  if (cleaned === 'GUEST') return 'GUEST';
+  if (cleaned === "TEAM_MEMBER" || cleaned === "TEAMMEMBER")
+    return "TEAM_MEMBER";
+  if (cleaned === "MEMBER") return "TEAM_MEMBER";
+  if (cleaned === "ADMIN") return "ADMIN";
+  if (cleaned === "GUEST") return "GUEST";
   return cleaned;
 }
 
 function normalizeLocations(locationList) {
   const cleaned = locationList
-    .map((location) => String(location || '').trim())
+    .map((location) => String(location || "").trim())
     .filter(Boolean);
 
   return [...new Set(cleaned)];
@@ -1041,56 +1336,83 @@ function normalizeLocations(locationList) {
 
 async function inviteUsers({ db, env, actorUserId, payload }) {
   const requestedByUserIdRaw = payload.requestedByUserId;
-  const requestedByUserId = requestedByUserIdRaw === undefined
-    ? actorUserId
-    : Number(requestedByUserIdRaw);
+  const requestedByUserId =
+    requestedByUserIdRaw === undefined
+      ? actorUserId
+      : Number(requestedByUserIdRaw);
 
   if (!Number.isFinite(requestedByUserId) || requestedByUserId <= 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'requestedByUserId must be a positive number.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "requestedByUserId must be a positive number.",
+    );
   }
 
   if (requestedByUserId !== actorUserId) {
-    throw new AppError(403, 'FORBIDDEN', 'requestedByUserId must match the authenticated user.');
+    throw new AppError(
+      403,
+      "FORBIDDEN",
+      "requestedByUserId must match the authenticated user.",
+    );
   }
 
-  const members = normalizeMembers(Array.isArray(payload.members) ? payload.members : []);
-  const locations = normalizeLocations(Array.isArray(payload.locations) ? payload.locations : []);
+  const members = normalizeMembers(
+    Array.isArray(payload.members) ? payload.members : [],
+  );
+  const locations = normalizeLocations(
+    Array.isArray(payload.locations) ? payload.locations : [],
+  );
 
   if (!members.length) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'members must be a non-empty array.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "members must be a non-empty array.",
+    );
   }
 
   if (!env.invite.baseUrl) {
-    throw new AppError(500, 'INVITE_CONFIG_ERROR', 'INVITE_BASE_URL (or APP_BASE_URL) is required.');
+    throw new AppError(
+      500,
+      "INVITE_CONFIG_ERROR",
+      "INVITE_BASE_URL (or APP_BASE_URL) is required.",
+    );
   }
 
   const invalidRole = members.find((member) => !ALLOWED_ROLES.has(member.role));
   if (invalidRole) {
-    throw new AppError(400, 'VALIDATION_ERROR', `Invalid role value for ${invalidRole.email}.`);
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      `Invalid role value for ${invalidRole.email}.`,
+    );
   }
 
   const emails = members.map((member) => member.email);
   const existingUsers = await db.user.findMany({
     where: { email: { in: emails } },
-    select: { id: true, email: true, status: true }
+    select: { id: true, email: true, status: true },
   });
   const existingInvitations = await db.userInvitation.findMany({
     where: {
       email: { in: emails },
-      status: { in: ['PENDING', 'ACCEPTED'] }
+      status: "PENDING",
     },
     select: {
       email: true,
       status: true,
-      expiresAt: true
+      expiresAt: true,
     },
-    orderBy: { id: 'desc' }
+    orderBy: { id: "desc" },
   });
 
   for (const user of existingUsers) {
-    const status = String(user.status || '').trim().toUpperCase();
+    const status = String(user.status || "")
+      .trim()
+      .toUpperCase();
 
-    if (status !== 'DELETED') {
+    if (status !== "DELETED") {
       // eslint-disable-next-line no-continue
       continue;
     }
@@ -1098,29 +1420,37 @@ async function inviteUsers({ db, env, actorUserId, payload }) {
     await db.user.update({
       where: { id: BigInt(user.id) },
       data: {
-        email: buildArchivedUserEmail(user.email, user.id)
-      }
+        email: buildArchivedUserEmail(user.email, user.id),
+      },
     });
   }
 
   const blockingExistingSet = new Set(
     existingUsers
-      .filter((user) => String(user.status || '').trim().toUpperCase() !== 'DELETED')
-      .map((user) => user.email.toLowerCase())
+      .filter(
+        (user) =>
+          String(user.status || "")
+            .trim()
+            .toUpperCase() !== "DELETED",
+      )
+      .map((user) => user.email.toLowerCase()),
   );
   const invitationStateByEmail = new Map();
   for (const row of existingInvitations) {
     const key = row.email.toLowerCase();
     const prev = invitationStateByEmail.get(key) || {
       hasAccepted: false,
-      hasPendingValid: false
+      hasPendingValid: false,
     };
-    if (row.status === 'ACCEPTED') {
+    if (row.status === "ACCEPTED") {
       prev.hasAccepted = true;
     }
-    if (row.status === 'PENDING') {
+    if (row.status === "PENDING") {
       const expiresAt = new Date(row.expiresAt);
-      if (!Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > Date.now()) {
+      if (
+        !Number.isNaN(expiresAt.getTime()) &&
+        expiresAt.getTime() > Date.now()
+      ) {
         prev.hasPendingValid = true;
       }
     }
@@ -1132,26 +1462,28 @@ async function inviteUsers({ db, env, actorUserId, payload }) {
     const { email, role } = member;
 
     if (!EMAIL_REGEX.test(email)) {
-      results.push({ email, status: 'SKIPPED_INVALID_EMAIL' });
+      results.push({ email, status: "SKIPPED_INVALID_EMAIL" });
       // eslint-disable-next-line no-continue
       continue;
     }
 
     if (blockingExistingSet.has(email)) {
-      results.push({ email, status: 'SKIPPED_USER_EXISTS' });
+      results.push({ email, status: "SKIPPED_USER_EXISTS" });
       // eslint-disable-next-line no-continue
       continue;
     }
     const inviteState = invitationStateByEmail.get(email);
     if (inviteState?.hasPendingValid) {
-      results.push({ email, status: 'SKIPPED_PENDING_INVITATION_EXISTS' });
+      results.push({ email, status: "SKIPPED_PENDING_INVITATION_EXISTS" });
       // eslint-disable-next-line no-continue
       continue;
     }
 
     const token = generateInviteToken();
     const tokenHash = hashInviteToken(token);
-    const expiresAt = new Date(Date.now() + env.invite.expiresInHours * 60 * 60 * 1000);
+    const expiresAt = new Date(
+      Date.now() + env.invite.expiresInHours * 60 * 60 * 1000,
+    );
 
     await db.$executeRaw`
       INSERT INTO user_invitations
@@ -1160,14 +1492,14 @@ async function inviteUsers({ db, env, actorUserId, payload }) {
       (${email}, ${role}, ${JSON.stringify(locations)}, ${tokenHash}, ${BigInt(requestedByUserId)}, 'PENDING', ${expiresAt}, NOW())
     `;
 
-    const inviteUrl = `${env.invite.baseUrl.replace(/\/$/, '')}?token=${encodeURIComponent(token)}`;
+    const inviteUrl = `${env.invite.baseUrl.replace(/\/$/, "")}?token=${encodeURIComponent(token)}`;
 
     try {
       await sendInviteEmail({
         env,
         to: email,
         inviteUrl,
-        role
+        role,
       });
 
       await db.$executeRaw`
@@ -1176,25 +1508,25 @@ async function inviteUsers({ db, env, actorUserId, payload }) {
         WHERE token_hash = ${tokenHash}
       `;
 
-      results.push({ email, role, status: 'INVITED' });
+      results.push({ email, role, status: "INVITED" });
     } catch (error) {
       await db.$executeRaw`
         UPDATE user_invitations
         SET status = 'FAILED', updated_at = NOW()
         WHERE token_hash = ${tokenHash}
       `;
-      results.push({ email, role, status: 'FAILED_TO_SEND' });
+      results.push({ email, role, status: "FAILED_TO_SEND" });
     }
   }
 
   const summary = results.reduce(
     (acc, row) => {
-      if (row.status === 'INVITED') acc.invited += 1;
-      else if (row.status === 'FAILED_TO_SEND') acc.failed += 1;
+      if (row.status === "INVITED") acc.invited += 1;
+      else if (row.status === "FAILED_TO_SEND") acc.failed += 1;
       else acc.skipped += 1;
       return acc;
     },
-    { invited: 0, failed: 0, skipped: 0 }
+    { invited: 0, failed: 0, skipped: 0 },
   );
 
   return { summary, locations, results };
@@ -1207,7 +1539,8 @@ async function getPermissionsSettings({ db }) {
     WHERE setting_key = ${PERMISSIONS_SETTINGS_KEY}
     LIMIT 1
   `;
-  const value = Array.isArray(rows) && rows.length > 0 ? rows[0].value_json : null;
+  const value =
+    Array.isArray(rows) && rows.length > 0 ? rows[0].value_json : null;
   const settings = parseStoredPermissionsValue(value);
 
   if (!value) {
@@ -1237,15 +1570,18 @@ module.exports = {
   listUsers,
   listActivityLogs,
   listPendingInvitations,
+  cancelPendingInvitation,
+  resendPendingInvitation,
   createUser,
   updateUser,
   updateOwnProfile,
   updateUserRole,
   updatePassword,
+  isSuperadminUser,
   changeOwnPassword,
   updateAvatar,
   softDeleteUser,
   inviteUsers,
   getPermissionsSettings,
-  updatePermissionsSettings
+  updatePermissionsSettings,
 };

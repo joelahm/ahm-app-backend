@@ -178,6 +178,8 @@ async function listProjects(req, res, next) {
   try {
     const data = await projectsService.listProjects({
       db: req.app.locals.db,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId,
       query: req.query || {}
     });
 
@@ -191,6 +193,8 @@ async function listTasksGroupedByProject(req, res, next) {
   try {
     const data = await projectsService.listTasksGroupedByProject({
       db: req.app.locals.db,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId,
       clientId: req.query.clientId
     });
 

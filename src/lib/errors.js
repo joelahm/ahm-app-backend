@@ -38,6 +38,21 @@ function toErrorResponse(err) {
     };
   }
 
+  // Body-parser surfaces malformed JSON bodies as a SyntaxError with
+  // `type === 'entity.parse.failed'`. Treat as a client error, not a 5xx.
+  if (err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && 'body' in err)) {
+    return {
+      statusCode: 400,
+      body: {
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Malformed JSON body.',
+          details: null
+        }
+      }
+    };
+  }
+
   return {
     statusCode: 500,
     body: {

@@ -39,6 +39,7 @@ model User {
   department        String?        @db.VarChar(64)
   phoneNumber       String?        @map("phone_number") @db.VarChar(64)
   country           String?        @db.VarChar(120)
+  discordUserId     String?        @map("discord_user_id") @db.VarChar(64)
   timezone          String?        @db.VarChar(64)
   dateFormat        String?        @map("date_format") @db.VarChar(32)
   status            String         @default("ACTIVE") @db.VarChar(32)
@@ -335,6 +336,7 @@ model ProjectTask {
   id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   projectId   BigInt    @map("project_id") @db.UnsignedBigInt
   parentTaskId BigInt?  @map("parent_task_id") @db.UnsignedBigInt
+  blockedTaskId BigInt? @map("blocked_task_id") @db.UnsignedBigInt
   task        String    @db.VarChar(180)
   projectType String?   @map("project_type") @db.VarChar(120)
   description String?   @db.Text
@@ -342,6 +344,10 @@ model ProjectTask {
   priority    String    @default("MEDIUM") @db.VarChar(64)
   startDate   DateTime? @map("start_date")
   dueDate     DateTime? @map("due_date")
+  dueDateRuleType String? @map("due_date_rule_type") @db.VarChar(32)
+  dueDateOffsetDays Int @default(0) @map("due_date_offset_days")
+  dueDateManualOverride Boolean @default(false) @map("due_date_manual_override")
+  templateTaskId String? @map("template_task_id") @db.VarChar(128)
   assignedTo  BigInt?   @map("assigned_to") @db.UnsignedBigInt
   createdBy   BigInt?   @map("created_by") @db.UnsignedBigInt
   createdAt   DateTime  @default(now()) @map("created_at")
@@ -350,12 +356,15 @@ model ProjectTask {
   project     ClientProject @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_project_tasks_project")
   parentTask  ProjectTask?  @relation("ProjectTaskHierarchy", fields: [parentTaskId], references: [id], onDelete: SetNull, map: "fk_project_tasks_parent_task")
   subtasks    ProjectTask[] @relation("ProjectTaskHierarchy")
+  blockedTask ProjectTask?  @relation("ProjectTaskBlockedDependency", fields: [blockedTaskId], references: [id], onDelete: SetNull, map: "fk_project_tasks_blocked_task")
+  dependentTasks ProjectTask[] @relation("ProjectTaskBlockedDependency")
   assignedUser User?        @relation("ProjectTaskAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull, map: "fk_project_tasks_assigned_to")
   creator      User?        @relation("ProjectTaskCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_project_tasks_created_by")
   comments     TaskComment[]
 
   @@index([projectId], map: "idx_project_tasks_project_id")
   @@index([parentTaskId], map: "idx_project_tasks_parent_task_id")
+  @@index([blockedTaskId], map: "idx_project_tasks_blocked_task_id")
   @@index([assignedTo], map: "idx_project_tasks_assigned_to")
   @@index([createdBy], map: "idx_project_tasks_created_by")
   @@map("project_tasks")

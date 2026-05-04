@@ -1,30 +1,39 @@
-const { AppError } = require('../../lib/errors');
-const usersService = require('./users.service');
-const { writeAuditLog } = require('../../lib/audit-log');
-const fs = require('fs/promises');
-const path = require('path');
+const { AppError } = require("../../lib/errors");
+const usersService = require("./users.service");
+const { writeAuditLog } = require("../../lib/audit-log");
+const fs = require("fs/promises");
+const path = require("path");
 
 function readUserId(req) {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid user id.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid user id.");
+  }
+  return id;
+}
+
+function readInvitationId(req) {
+  const id = Number(req.params.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid invitation id.");
   }
   return id;
 }
 
 function resolveRequestOrigin(req) {
-  const forwardedProto = req.headers['x-forwarded-proto'];
-  const proto = typeof forwardedProto === 'string' && forwardedProto
-    ? forwardedProto.split(',')[0].trim()
-    : req.protocol;
-  return `${proto}://${req.get('host')}`;
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const proto =
+    typeof forwardedProto === "string" && forwardedProto
+      ? forwardedProto.split(",")[0].trim()
+      : req.protocol;
+  return `${proto}://${req.get("host")}`;
 }
 
 function toAbsoluteAvatarUrl(req, avatarUrl) {
   if (!avatarUrl) return null;
   if (/^https?:\/\//i.test(avatarUrl)) return avatarUrl;
   const origin = resolveRequestOrigin(req);
-  return `${origin}${avatarUrl.startsWith('/') ? avatarUrl : `/${avatarUrl}`}`;
+  return `${origin}${avatarUrl.startsWith("/") ? avatarUrl : `/${avatarUrl}`}`;
 }
 
 async function listUsers(req, res, next) {
@@ -32,18 +41,18 @@ async function listUsers(req, res, next) {
     const data = await usersService.listUsers({
       db: req.app.locals.db,
       page: req.query.page,
-      limit: req.query.limit
+      limit: req.query.limit,
     });
 
     const users = data.users.map((user) => ({
       ...user,
       avatarPath: user.avatarUrl || null,
-      avatarUrl: toAbsoluteAvatarUrl(req, user.avatarUrl)
+      avatarUrl: toAbsoluteAvatarUrl(req, user.avatarUrl),
     }));
 
     res.status(200).json({
       ...data,
-      users
+      users,
     });
   } catch (err) {
     next(err);
@@ -56,7 +65,7 @@ async function listActivityLogs(req, res, next) {
       db: req.app.locals.db,
       page: req.query.page,
       limit: req.query.limit,
-      actorUserId: req.query.actorUserId
+      actorUserId: req.query.actorUserId,
     });
 
     res.status(200).json(data);
@@ -68,7 +77,60 @@ async function listActivityLogs(req, res, next) {
 async function listPendingInvitations(req, res, next) {
   try {
     const data = await usersService.listPendingInvitations({
-      db: req.app.locals.db
+      db: req.app.locals.db,
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function cancelPendingInvitation(req, res, next) {
+  try {
+    const invitationId = readInvitationId(req);
+    const data = await usersService.cancelPendingInvitation({
+      db: req.app.locals.db,
+      invitationId,
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: "USER_INVITATION_CANCELLED",
+      resourceType: "user_invitation",
+      resourceId: invitationId,
+      metadata: {
+        email: data.email,
+      },
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function resendPendingInvitation(req, res, next) {
+  try {
+    const invitationId = readInvitationId(req);
+    const data = await usersService.resendPendingInvitation({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      invitationId,
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: "USER_INVITATION_RESENT",
+      resourceType: "user_invitation",
+      resourceId: invitationId,
+      metadata: {
+        email: data.email,
+      },
     });
 
     res.status(200).json(data);
@@ -82,21 +144,21 @@ async function createUser(req, res, next) {
     const user = await usersService.createUser({
       db: req.app.locals.db,
       actorUserId: req.auth.userId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'USER_CREATED',
-      resourceType: 'user',
+      action: "USER_CREATED",
+      resourceType: "user",
       resourceId: user.id,
       metadata: {
         email: user.email,
         role: user.role,
-        status: user.status
-      }
+        status: user.status,
+      },
     });
 
     res.status(201).json({ user });
@@ -112,21 +174,21 @@ async function patchMe(req, res, next) {
       userId: req.auth.userId,
       payload: {
         ...(req.body || {}),
-        filePath: req.file?.path
-      }
+        filePath: req.file?.path,
+      },
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'PROFILE_UPDATED',
-      resourceType: 'user',
+      action: "PROFILE_UPDATED",
+      resourceType: "user",
       resourceId: req.auth.userId,
       metadata: {
         updatedFields: Object.keys(req.body || {}),
-        avatarUpdated: Boolean(req.file?.path)
-      }
+        avatarUpdated: Boolean(req.file?.path),
+      },
     });
 
     res.status(200).json(data);
@@ -145,19 +207,19 @@ async function patchUser(req, res, next) {
     await usersService.updateUser({
       db: req.app.locals.db,
       userId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'USER_UPDATED',
-      resourceType: 'user',
+      action: "USER_UPDATED",
+      resourceType: "user",
       resourceId: userId,
       metadata: {
-        updatedFields: Object.keys(req.body || {})
-      }
+        updatedFields: Object.keys(req.body || {}),
+      },
     });
 
     res.status(200).json({ success: true });
@@ -173,19 +235,19 @@ async function patchUserRole(req, res, next) {
     const data = await usersService.updateUserRole({
       db: req.app.locals.db,
       userId,
-      role
+      role,
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'USER_ROLE_UPDATED',
-      resourceType: 'user',
+      action: "USER_ROLE_UPDATED",
+      resourceType: "user",
       resourceId: userId,
       metadata: {
-        role
-      }
+        role,
+      },
     });
 
     res.status(200).json(data);
@@ -197,20 +259,42 @@ async function patchUserRole(req, res, next) {
 async function patchPassword(req, res, next) {
   try {
     const userId = readUserId(req);
-    const { newPassword } = req.body || {};
+    const { confirmPassword, newPassword } = req.body || {};
+    const isSuperadmin = await usersService.isSuperadminUser({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      userId: req.auth.userId,
+    });
+
+    if (!isSuperadmin) {
+      throw new AppError(
+        403,
+        "FORBIDDEN",
+        "Only superadmins can change another user password.",
+      );
+    }
+
+    if (newPassword !== confirmPassword) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "newPassword and confirmPassword must match.",
+      );
+    }
+
     await usersService.updatePassword({
       db: req.app.locals.db,
       userId,
-      newPassword
+      newPassword,
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'USER_PASSWORD_UPDATED',
-      resourceType: 'user',
-      resourceId: userId
+      action: "USER_PASSWORD_UPDATED",
+      resourceType: "user",
+      resourceId: userId,
     });
 
     res.status(200).json({ success: true });
@@ -227,16 +311,16 @@ async function patchMyPassword(req, res, next) {
       userId: req.auth.userId,
       currentPassword,
       newPassword,
-      confirmPassword
+      confirmPassword,
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'PROFILE_PASSWORD_UPDATED',
-      resourceType: 'user',
-      resourceId: req.auth.userId
+      action: "PROFILE_PASSWORD_UPDATED",
+      resourceType: "user",
+      resourceId: req.auth.userId,
     });
 
     res.status(200).json({ success: true });
@@ -251,16 +335,16 @@ async function patchAvatar(req, res, next) {
     const user = await usersService.updateAvatar({
       db: req.app.locals.db,
       userId,
-      filePath: req.file?.path
+      filePath: req.file?.path,
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'USER_AVATAR_UPDATED',
-      resourceType: 'user',
-      resourceId: userId
+      action: "USER_AVATAR_UPDATED",
+      resourceType: "user",
+      resourceId: userId,
     });
 
     res.status(200).json({ user });
@@ -278,16 +362,16 @@ async function deleteUser(req, res, next) {
     const userId = readUserId(req);
     const data = await usersService.softDeleteUser({
       db: req.app.locals.db,
-      userId
+      userId,
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'USER_DELETED',
-      resourceType: 'user',
-      resourceId: userId
+      action: "USER_DELETED",
+      resourceType: "user",
+      resourceId: userId,
     });
 
     res.status(200).json(data);
@@ -302,19 +386,19 @@ async function inviteUsers(req, res, next) {
       db: req.app.locals.db,
       env: req.app.locals.env,
       actorUserId: req.auth.userId,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'USERS_INVITED',
-      resourceType: 'user_invitation',
+      action: "USERS_INVITED",
+      resourceType: "user_invitation",
       metadata: {
         summary: data.summary,
-        totalResults: Array.isArray(data.results) ? data.results.length : 0
-      }
+        totalResults: Array.isArray(data.results) ? data.results.length : 0,
+      },
     });
 
     res.status(200).json(data);
@@ -326,7 +410,7 @@ async function inviteUsers(req, res, next) {
 async function getPermissionsSettings(req, res, next) {
   try {
     const data = await usersService.getPermissionsSettings({
-      db: req.app.locals.db
+      db: req.app.locals.db,
     });
 
     res.status(200).json(data);
@@ -339,16 +423,16 @@ async function patchPermissionsSettings(req, res, next) {
   try {
     const data = await usersService.updatePermissionsSettings({
       db: req.app.locals.db,
-      payload: req.body || {}
+      payload: req.body || {},
     });
 
     await writeAuditLog({
       db: req.app.locals.db,
       req,
       actorUserId: req.auth.userId,
-      action: 'PERMISSIONS_UPDATED',
-      resourceType: 'settings',
-      resourceId: 'workspace_permissions'
+      action: "PERMISSIONS_UPDATED",
+      resourceType: "settings",
+      resourceId: "workspace_permissions",
     });
 
     res.status(200).json(data);
@@ -361,6 +445,8 @@ module.exports = {
   listUsers,
   listActivityLogs,
   listPendingInvitations,
+  cancelPendingInvitation,
+  resendPendingInvitation,
   createUser,
   patchMe,
   patchUser,
@@ -371,5 +457,5 @@ module.exports = {
   deleteUser,
   inviteUsers,
   getPermissionsSettings,
-  patchPermissionsSettings
+  patchPermissionsSettings,
 };

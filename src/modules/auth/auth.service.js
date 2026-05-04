@@ -1,17 +1,25 @@
-const { AppError } = require('../../lib/errors');
-const { verifyPassword } = require('../../lib/password');
-const { hashPassword } = require('../../lib/password');
-const { signAccessToken, signRefreshToken, verifyRefreshToken } = require('../../lib/jwt');
-const { generateSessionId, generateTokenFamily, hashRefreshToken } = require('../../lib/refreshToken');
-const { hashInviteToken } = require('../../lib/inviteToken');
+const { AppError } = require("../../lib/errors");
+const { verifyPassword } = require("../../lib/password");
+const { hashPassword } = require("../../lib/password");
+const {
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+} = require("../../lib/jwt");
+const {
+  generateSessionId,
+  generateTokenFamily,
+  hashRefreshToken,
+} = require("../../lib/refreshToken");
+const { hashInviteToken } = require("../../lib/inviteToken");
 
 const ALLOWED_DEPARTMENTS = new Set([
-  'CSM',
-  'SEO',
-  'Designer',
-  'Web Development',
-  'Operations',
-  'Management'
+  "CSM",
+  "SEO",
+  "Designer",
+  "Web Development",
+  "Operations",
+  "Management",
 ]);
 
 function mapUser(user) {
@@ -29,19 +37,32 @@ function mapUser(user) {
     department: user.department ?? null,
     phone_number: user.phoneNumber ?? null,
     country: user.country ?? null,
+    discord_user_id: user.discordUserId ?? null,
     timezone: user.timezone ?? null,
     date_format: user.dateFormat ?? null,
     created_at: user.createdAt ?? null,
     updated_at: user.updatedAt ?? null,
-    password_hash: user.passwordHash
+    password_hash: user.passwordHash,
   };
 }
 
+function isSuperadminEmail(email, env) {
+  const superadminUsers = Array.isArray(env?.superadminUsers)
+    ? env.superadminUsers
+    : [];
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
+
+  return Boolean(normalizedEmail && superadminUsers.includes(normalizedEmail));
+}
+
 function buildArchivedCredentialsIdentityValue(email, identityId, userId) {
-  const localPart = String(email || '')
-    .split('@')[0]
-    .replace(/[^a-zA-Z0-9._-]/g, '')
-    .toLowerCase() || 'user';
+  const localPart =
+    String(email || "")
+      .split("@")[0]
+      .replace(/[^a-zA-Z0-9._-]/g, "")
+      .toLowerCase() || "user";
   const suffix = `deleted-${Date.now()}-${String(identityId)}-${String(userId)}`;
   const archived = `${localPart}+${suffix}@archived.local`;
 
@@ -57,8 +78,20 @@ async function getActiveUserByEmail(db, email) {
       passwordHash: true,
       roleCode: true,
       isActive: true,
-      status: true
-    }
+      status: true,
+      firstName: true,
+      lastName: true,
+      avatarUrl: true,
+      title: true,
+      department: true,
+      phoneNumber: true,
+      country: true,
+      discordUserId: true,
+      timezone: true,
+      dateFormat: true,
+      createdAt: true,
+      updatedAt: true,
+    },
   });
 
   return mapUser(user);
@@ -80,17 +113,26 @@ async function getActiveUserById(db, userId) {
       department: true,
       phoneNumber: true,
       country: true,
+      discordUserId: true,
       timezone: true,
       dateFormat: true,
       createdAt: true,
-      updatedAt: true
-    }
+      updatedAt: true,
+    },
   });
 
   return mapUser(user);
 }
 
-async function persistRefreshToken({ db, userId, refresh, sessionId, tokenFamily, ipAddress, userAgent }) {
+async function persistRefreshToken({
+  db,
+  userId,
+  refresh,
+  sessionId,
+  tokenFamily,
+  ipAddress,
+  userAgent,
+}) {
   const tokenHash = hashRefreshToken(refresh.token);
 
   await db.refreshToken.create({
@@ -103,13 +145,15 @@ async function persistRefreshToken({ db, userId, refresh, sessionId, tokenFamily
       expiresAt: new Date(refresh.expiresAt * 1000),
       createdByIp: ipAddress || null,
       userAgent: userAgent || null,
-      isRevoked: false
-    }
+      isRevoked: false,
+    },
   });
 }
 
 async function releaseDeletedCredentialsIdentityConflict({ tx, email }) {
-  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
   if (!normalizedEmail) {
     return;
   }
@@ -128,16 +172,22 @@ async function releaseDeletedCredentialsIdentityConflict({ tx, email }) {
   }
 
   const conflict = rows[0];
-  const linkedStatus = String(conflict.status || '').trim().toUpperCase();
+  const linkedStatus = String(conflict.status || "")
+    .trim()
+    .toUpperCase();
 
-  if (linkedStatus && linkedStatus !== 'DELETED') {
-    throw new AppError(409, 'INVITATION_ALREADY_USED', 'Invitation is no longer valid.');
+  if (linkedStatus && linkedStatus !== "DELETED") {
+    throw new AppError(
+      409,
+      "INVITATION_ALREADY_USED",
+      "Invitation is no longer valid.",
+    );
   }
 
   const replacement = buildArchivedCredentialsIdentityValue(
     normalizedEmail,
     conflict.id,
-    conflict.user_id
+    conflict.user_id,
   );
 
   await tx.$executeRaw`
@@ -153,23 +203,36 @@ async function login({ db, env, email, password, ipAddress, userAgent }) {
   const user = await getActiveUserByEmail(db, email);
 
   if (!user || !user.password_hash) {
-    throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password.');
+    throw new AppError(
+      401,
+      "INVALID_CREDENTIALS",
+      "Invalid email or password.",
+    );
   }
 
-  if (!user.isActive || user.status !== 'ACTIVE') {
-    throw new AppError(403, 'ACCOUNT_DISABLED', 'Account is not active.');
+  if (!user.isActive || user.status !== "ACTIVE") {
+    throw new AppError(403, "ACCOUNT_DISABLED", "Account is not active.");
   }
 
   const isValid = await verifyPassword(password, user.password_hash);
   if (!isValid) {
-    throw new AppError(401, 'INVALID_CREDENTIALS', 'Invalid email or password.');
+    throw new AppError(
+      401,
+      "INVALID_CREDENTIALS",
+      "Invalid email or password.",
+    );
   }
 
   const sessionId = generateSessionId();
   const tokenFamily = generateTokenFamily();
 
   const access = signAccessToken({ user, env, sessionId });
-  const refresh = signRefreshToken({ userId: user.id, env, sessionId, tokenFamily });
+  const refresh = signRefreshToken({
+    userId: user.id,
+    env,
+    sessionId,
+    tokenFamily,
+  });
 
   await persistRefreshToken({
     db,
@@ -178,22 +241,22 @@ async function login({ db, env, email, password, ipAddress, userAgent }) {
     sessionId,
     tokenFamily,
     ipAddress,
-    userAgent
+    userAgent,
   });
 
   return {
     user: {
       id: user.id,
       email: user.email,
-      role: user.role
+      role: user.role,
     },
     tokens: {
       accessToken: access.token,
       accessTokenExpiresAt: access.expiresAt,
       refreshToken: refresh.token,
       refreshTokenExpiresAt: refresh.expiresAt,
-      sessionId
-    }
+      sessionId,
+    },
   };
 }
 
@@ -203,8 +266,8 @@ async function revokeTokenFamily(db, tokenFamily, reason) {
     data: {
       isRevoked: true,
       revokedAt: new Date(),
-      revokedReason: reason
-    }
+      revokedReason: reason,
+    },
   });
 }
 
@@ -213,39 +276,65 @@ async function refresh({ db, env, refreshToken, ipAddress, userAgent }) {
   try {
     decoded = verifyRefreshToken(refreshToken, env);
   } catch (err) {
-    throw new AppError(401, 'INVALID_REFRESH_TOKEN', 'Invalid or expired refresh token.');
+    throw new AppError(
+      401,
+      "INVALID_REFRESH_TOKEN",
+      "Invalid or expired refresh token.",
+    );
   }
 
-  const tokenRecord = await db.refreshToken.findUnique({ where: { jti: decoded.jti } });
+  const tokenRecord = await db.refreshToken.findUnique({
+    where: { jti: decoded.jti },
+  });
 
   if (!tokenRecord) {
-    throw new AppError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token not recognized.');
+    throw new AppError(
+      401,
+      "INVALID_REFRESH_TOKEN",
+      "Refresh token not recognized.",
+    );
   }
 
   const presentedHash = hashRefreshToken(refreshToken);
 
   if (tokenRecord.tokenHash !== presentedHash) {
-    await revokeTokenFamily(db, tokenRecord.tokenFamily, 'TOKEN_HASH_MISMATCH_REUSE_DETECTED');
-    throw new AppError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token rejected.');
+    await revokeTokenFamily(
+      db,
+      tokenRecord.tokenFamily,
+      "TOKEN_HASH_MISMATCH_REUSE_DETECTED",
+    );
+    throw new AppError(401, "INVALID_REFRESH_TOKEN", "Refresh token rejected.");
   }
 
   if (tokenRecord.isRevoked || tokenRecord.replacedByJti) {
-    await revokeTokenFamily(db, tokenRecord.tokenFamily, 'ROTATED_TOKEN_REUSE_DETECTED');
-    throw new AppError(401, 'INVALID_REFRESH_TOKEN', 'Refresh token already rotated or revoked.');
+    await revokeTokenFamily(
+      db,
+      tokenRecord.tokenFamily,
+      "ROTATED_TOKEN_REUSE_DETECTED",
+    );
+    throw new AppError(
+      401,
+      "INVALID_REFRESH_TOKEN",
+      "Refresh token already rotated or revoked.",
+    );
   }
 
   const user = await getActiveUserById(db, Number(tokenRecord.userId));
-  if (!user || !user.isActive || user.status !== 'ACTIVE') {
-    await revokeTokenFamily(db, tokenRecord.tokenFamily, 'ACCOUNT_NOT_ACTIVE');
-    throw new AppError(403, 'ACCOUNT_DISABLED', 'Account is not active.');
+  if (!user || !user.isActive || user.status !== "ACTIVE") {
+    await revokeTokenFamily(db, tokenRecord.tokenFamily, "ACCOUNT_NOT_ACTIVE");
+    throw new AppError(403, "ACCOUNT_DISABLED", "Account is not active.");
   }
 
-  const access = signAccessToken({ user, env, sessionId: tokenRecord.sessionId });
+  const access = signAccessToken({
+    user,
+    env,
+    sessionId: tokenRecord.sessionId,
+  });
   const nextRefresh = signRefreshToken({
     userId: user.id,
     env,
     sessionId: tokenRecord.sessionId,
-    tokenFamily: tokenRecord.tokenFamily
+    tokenFamily: tokenRecord.tokenFamily,
   });
 
   await db.$transaction(async (tx) => {
@@ -254,10 +343,10 @@ async function refresh({ db, env, refreshToken, ipAddress, userAgent }) {
       data: {
         isRevoked: true,
         revokedAt: new Date(),
-        revokedReason: 'ROTATED',
+        revokedReason: "ROTATED",
         replacedByJti: nextRefresh.jti,
-        lastUsedAt: new Date()
-      }
+        lastUsedAt: new Date(),
+      },
     });
 
     await tx.refreshToken.create({
@@ -270,8 +359,8 @@ async function refresh({ db, env, refreshToken, ipAddress, userAgent }) {
         expiresAt: new Date(nextRefresh.expiresAt * 1000),
         createdByIp: ipAddress || null,
         userAgent: userAgent || null,
-        isRevoked: false
-      }
+        isRevoked: false,
+      },
     });
   });
 
@@ -279,22 +368,22 @@ async function refresh({ db, env, refreshToken, ipAddress, userAgent }) {
     user: {
       id: user.id,
       email: user.email,
-      role: user.role
+      role: user.role,
     },
     tokens: {
       accessToken: access.token,
       accessTokenExpiresAt: access.expiresAt,
       refreshToken: nextRefresh.token,
       refreshTokenExpiresAt: nextRefresh.expiresAt,
-      sessionId: tokenRecord.sessionId
-    }
+      sessionId: tokenRecord.sessionId,
+    },
   };
 }
 
 async function logout({ db, env, refreshToken }) {
   try {
     const decoded = verifyRefreshToken(refreshToken, env);
-    await revokeTokenFamily(db, decoded.fam, 'LOGOUT');
+    await revokeTokenFamily(db, decoded.fam, "LOGOUT");
     return;
   } catch (err) {
     return;
@@ -304,7 +393,7 @@ async function logout({ db, env, refreshToken }) {
 function parseLocations(locationsJson) {
   if (!locationsJson) return [];
   if (Array.isArray(locationsJson)) return locationsJson;
-  if (typeof locationsJson === 'string') {
+  if (typeof locationsJson === "string") {
     try {
       const parsed = JSON.parse(locationsJson);
       return Array.isArray(parsed) ? parsed : [];
@@ -324,18 +413,30 @@ async function getInvitationByTokenHash(db, tokenHash) {
   `;
 
   if (!rows.length) {
-    throw new AppError(400, 'INVALID_INVITATION_TOKEN', 'Invitation token is invalid or expired.');
+    throw new AppError(
+      400,
+      "INVALID_INVITATION_TOKEN",
+      "Invitation token is invalid or expired.",
+    );
   }
 
   const invite = rows[0];
   const expiresAt = new Date(invite.expires_at);
 
-  if (invite.status !== 'PENDING') {
-    throw new AppError(400, 'INVALID_INVITATION_TOKEN', 'Invitation token is invalid or expired.');
+  if (invite.status !== "PENDING") {
+    throw new AppError(
+      400,
+      "INVALID_INVITATION_TOKEN",
+      "Invitation token is invalid or expired.",
+    );
   }
 
   if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() < Date.now()) {
-    throw new AppError(400, 'INVALID_INVITATION_TOKEN', 'Invitation token is invalid or expired.');
+    throw new AppError(
+      400,
+      "INVALID_INVITATION_TOKEN",
+      "Invitation token is invalid or expired.",
+    );
   }
 
   return {
@@ -343,7 +444,7 @@ async function getInvitationByTokenHash(db, tokenHash) {
     email: invite.email,
     role: invite.role_code,
     locations: parseLocations(invite.locations_json),
-    expiresAt: expiresAt.toISOString()
+    expiresAt: expiresAt.toISOString(),
   };
 }
 
@@ -353,11 +454,15 @@ async function validateInvitation({ db, token }) {
 
   const existing = await db.user.findUnique({
     where: { email: invite.email },
-    select: { id: true }
+    select: { id: true },
   });
 
   if (existing) {
-    throw new AppError(409, 'INVITATION_ALREADY_USED', 'Invitation is no longer valid.');
+    throw new AppError(
+      409,
+      "INVITATION_ALREADY_USED",
+      "Invitation is no longer valid.",
+    );
   }
 
   return {
@@ -365,18 +470,35 @@ async function validateInvitation({ db, token }) {
       email: invite.email,
       role: invite.role,
       locations: invite.locations,
-      expiresAt: invite.expiresAt
-    }
+      expiresAt: invite.expiresAt,
+    },
   };
 }
 
-async function acceptInvitation({ db, env, token, firstName, lastName, password, ipAddress, userAgent }) {
+async function acceptInvitation({
+  db,
+  env,
+  token,
+  firstName,
+  lastName,
+  password,
+  ipAddress,
+  userAgent,
+}) {
   if (!firstName || !lastName || !password) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'firstName, lastName and password are required.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "firstName, lastName and password are required.",
+    );
   }
 
   if (String(password).length < 10) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Password must be at least 10 characters.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "Password must be at least 10 characters.",
+    );
   }
 
   const tokenHash = hashInviteToken(token);
@@ -389,11 +511,15 @@ async function acceptInvitation({ db, env, token, firstName, lastName, password,
 
     const existing = await tx.user.findUnique({
       where: { email: invite.email },
-      select: { id: true }
+      select: { id: true },
     });
 
     if (existing) {
-      throw new AppError(409, 'INVITATION_ALREADY_USED', 'Invitation is no longer valid.');
+      throw new AppError(
+        409,
+        "INVITATION_ALREADY_USED",
+        "Invitation is no longer valid.",
+      );
     }
 
     createdUser = await tx.user.create({
@@ -403,19 +529,19 @@ async function acceptInvitation({ db, env, token, firstName, lastName, password,
         roleCode: invite.role,
         firstName: String(firstName).trim(),
         lastName: String(lastName).trim(),
-        status: 'ACTIVE',
-        isActive: true
+        status: "ACTIVE",
+        isActive: true,
       },
       select: {
         id: true,
         email: true,
-        roleCode: true
-      }
+        roleCode: true,
+      },
     });
 
     await releaseDeletedCredentialsIdentityConflict({
       tx,
-      email: createdUser.email
+      email: createdUser.email,
     });
 
     await tx.$executeRaw`
@@ -426,29 +552,35 @@ async function acceptInvitation({ db, env, token, firstName, lastName, password,
     `;
 
     const updated = await tx.$executeRaw`
-      UPDATE user_invitations
-      SET status = 'ACCEPTED',
-          accepted_at = NOW(),
-          updated_at = NOW()
+      DELETE FROM user_invitations
       WHERE id = ${BigInt(invite.id)}
         AND status = 'PENDING'
     `;
 
     if (!updated) {
-      throw new AppError(409, 'INVITATION_ALREADY_USED', 'Invitation is no longer valid.');
+      throw new AppError(
+        409,
+        "INVITATION_ALREADY_USED",
+        "Invitation is no longer valid.",
+      );
     }
   });
 
   const user = {
     id: Number(createdUser.id),
     email: createdUser.email,
-    role: createdUser.roleCode
+    role: createdUser.roleCode,
   };
 
   const sessionId = generateSessionId();
   const tokenFamily = generateTokenFamily();
   const access = signAccessToken({ user, env, sessionId });
-  const refreshToken = signRefreshToken({ userId: user.id, env, sessionId, tokenFamily });
+  const refreshToken = signRefreshToken({
+    userId: user.id,
+    env,
+    sessionId,
+    tokenFamily,
+  });
 
   await persistRefreshToken({
     db,
@@ -457,7 +589,7 @@ async function acceptInvitation({ db, env, token, firstName, lastName, password,
     sessionId,
     tokenFamily,
     ipAddress,
-    userAgent
+    userAgent,
   });
 
   return {
@@ -467,9 +599,25 @@ async function acceptInvitation({ db, env, token, firstName, lastName, password,
       accessTokenExpiresAt: access.expiresAt,
       refreshToken: refreshToken.token,
       refreshTokenExpiresAt: refreshToken.expiresAt,
-      sessionId
-    }
+      sessionId,
+    },
   };
+}
+
+const DISCORD_USER_ID_REGEX = /^\d{15,25}$/;
+
+function parseOptionalDiscordUserId(value) {
+  if (value === undefined || value === null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  if (!DISCORD_USER_ID_REGEX.test(trimmed)) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "discordUserId must be a 15-25 digit Discord user ID.",
+    );
+  }
+  return trimmed;
 }
 
 async function registerInvitedUser({
@@ -483,38 +631,54 @@ async function registerInvitedUser({
   phoneNumber,
   email,
   country,
+  discordUserId,
   password,
   confirmPassword,
   ipAddress,
-  userAgent
+  userAgent,
 }) {
-  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
+  const normalizedDiscordUserId = parseOptionalDiscordUserId(discordUserId);
 
   if (
-    !token
-    || !firstName
-    || !lastName
-    || !title
-    || !department
-    || !phoneNumber
-    || !normalizedEmail
-    || !country
-    || !password
-    || !confirmPassword
+    !token ||
+    !firstName ||
+    !lastName ||
+    !title ||
+    !department ||
+    !phoneNumber ||
+    !normalizedEmail ||
+    !country ||
+    !password ||
+    !confirmPassword
   ) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'All registration fields are required.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "All registration fields are required.",
+    );
   }
 
   if (password !== confirmPassword) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Password and confirmPassword must match.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "Password and confirmPassword must match.",
+    );
   }
 
   if (String(password).length < 10) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Password must be at least 10 characters.');
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "Password must be at least 10 characters.",
+    );
   }
 
   if (!ALLOWED_DEPARTMENTS.has(String(department).trim())) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid department value.');
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid department value.");
   }
 
   const tokenHash = hashInviteToken(token);
@@ -526,23 +690,31 @@ async function registerInvitedUser({
     const invite = await getInvitationByTokenHash(tx, tokenHash);
 
     if (invite.email.toLowerCase() !== normalizedEmail) {
-      throw new AppError(400, 'INVALID_INVITATION_TOKEN', 'Invitation token is invalid or expired.');
+      throw new AppError(
+        400,
+        "INVALID_INVITATION_TOKEN",
+        "Invitation token is invalid or expired.",
+      );
     }
 
     const existing = await tx.user.findUnique({
       where: { email: normalizedEmail },
-      select: { id: true }
+      select: { id: true },
     });
 
     if (existing) {
-      throw new AppError(409, 'INVITATION_ALREADY_USED', 'Invitation is no longer valid.');
+      throw new AppError(
+        409,
+        "INVITATION_ALREADY_USED",
+        "Invitation is no longer valid.",
+      );
     }
 
     await tx.$executeRaw`
       INSERT INTO users
-      (email, password_hash, role_code, first_name, last_name, title, department, phone_number, country, status, is_active, created_at, updated_at)
+      (email, password_hash, role_code, first_name, last_name, title, department, phone_number, country, discord_user_id, status, is_active, created_at, updated_at)
       VALUES
-      (${normalizedEmail}, ${passwordHash}, ${invite.role}, ${String(firstName).trim()}, ${String(lastName).trim()}, ${String(title).trim()}, ${String(department).trim()}, ${String(phoneNumber).trim()}, ${String(country).trim()}, 'ACTIVE', 1, NOW(), NOW())
+      (${normalizedEmail}, ${passwordHash}, ${invite.role}, ${String(firstName).trim()}, ${String(lastName).trim()}, ${String(title).trim()}, ${String(department).trim()}, ${String(phoneNumber).trim()}, ${String(country).trim()}, ${normalizedDiscordUserId}, 'ACTIVE', 1, NOW(), NOW())
     `;
 
     createdUser = await tx.user.findUnique({
@@ -550,13 +722,13 @@ async function registerInvitedUser({
       select: {
         id: true,
         email: true,
-        roleCode: true
-      }
+        roleCode: true,
+      },
     });
 
     await releaseDeletedCredentialsIdentityConflict({
       tx,
-      email: createdUser.email
+      email: createdUser.email,
     });
 
     await tx.$executeRaw`
@@ -567,29 +739,35 @@ async function registerInvitedUser({
     `;
 
     const updated = await tx.$executeRaw`
-      UPDATE user_invitations
-      SET status = 'ACCEPTED',
-          accepted_at = NOW(),
-          updated_at = NOW()
+      DELETE FROM user_invitations
       WHERE id = ${BigInt(invite.id)}
         AND status = 'PENDING'
     `;
 
     if (!updated) {
-      throw new AppError(409, 'INVITATION_ALREADY_USED', 'Invitation is no longer valid.');
+      throw new AppError(
+        409,
+        "INVITATION_ALREADY_USED",
+        "Invitation is no longer valid.",
+      );
     }
   });
 
   const user = {
     id: Number(createdUser.id),
     email: createdUser.email,
-    role: createdUser.roleCode
+    role: createdUser.roleCode,
   };
 
   const sessionId = generateSessionId();
   const tokenFamily = generateTokenFamily();
   const access = signAccessToken({ user, env, sessionId });
-  const refreshToken = signRefreshToken({ userId: user.id, env, sessionId, tokenFamily });
+  const refreshToken = signRefreshToken({
+    userId: user.id,
+    env,
+    sessionId,
+    tokenFamily,
+  });
 
   await persistRefreshToken({
     db,
@@ -598,7 +776,7 @@ async function registerInvitedUser({
     sessionId,
     tokenFamily,
     ipAddress,
-    userAgent
+    userAgent,
   });
 
   return {
@@ -608,56 +786,64 @@ async function registerInvitedUser({
       accessTokenExpiresAt: access.expiresAt,
       refreshToken: refreshToken.token,
       refreshTokenExpiresAt: refreshToken.expiresAt,
-      sessionId
-    }
+      sessionId,
+    },
   };
 }
 
 async function checkPendingInvitationByEmail({ db, email }) {
-  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const normalizedEmail = String(email || "")
+    .trim()
+    .toLowerCase();
   if (!normalizedEmail) {
-    throw new AppError(400, 'VALIDATION_ERROR', 'email is required.');
+    throw new AppError(400, "VALIDATION_ERROR", "email is required.");
   }
 
   const existingUser = await db.user.findUnique({
     where: { email: normalizedEmail },
-    select: { id: true, status: true, isActive: true }
+    select: { id: true, status: true, isActive: true },
   });
-  if (existingUser && String(existingUser.status || '').toUpperCase() !== 'DELETED') {
+  if (
+    existingUser &&
+    String(existingUser.status || "").toUpperCase() !== "DELETED"
+  ) {
     return {
       email: normalizedEmail,
       canInvite: false,
-      reason: 'USER_ALREADY_EXISTS',
-      hasValidPendingInvitation: false
+      reason: "USER_ALREADY_EXISTS",
+      hasValidPendingInvitation: false,
     };
   }
 
   const rows = await db.userInvitation.findMany({
     where: {
       email: normalizedEmail,
-      status: { in: ['PENDING', 'ACCEPTED'] }
+      status: "PENDING",
     },
     select: {
       email: true,
       roleCode: true,
       locationsJson: true,
       status: true,
-      expiresAt: true
+      expiresAt: true,
     },
-    orderBy: { id: 'desc' },
-    take: 20
+    orderBy: { id: "desc" },
+    take: 20,
   });
 
-  const validInvite = rows.find((row) => {
-    const expiresAt = new Date(row.expiresAt);
-    return !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > Date.now();
-  }) || null;
+  const validInvite =
+    rows.find((row) => {
+      const expiresAt = new Date(row.expiresAt);
+      return (
+        !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > Date.now()
+      );
+    }) || null;
   if (!validInvite) {
     return {
       email: normalizedEmail,
       canInvite: true,
-      reason: 'INVITABLE',
-      hasValidPendingInvitation: false
+      reason: "INVITABLE",
+      hasValidPendingInvitation: false,
     };
   }
 
@@ -665,13 +851,13 @@ async function checkPendingInvitationByEmail({ db, email }) {
   return {
     email: invite.email,
     canInvite: false,
-    reason: 'PENDING_INVITATION_EXISTS',
+    reason: "PENDING_INVITATION_EXISTS",
     hasValidPendingInvitation: true,
     invitation: {
       role: invite.roleCode,
       locations: parseLocations(invite.locationsJson),
-      expiresAt: new Date(invite.expiresAt).toISOString()
-    }
+      expiresAt: new Date(invite.expiresAt).toISOString(),
+    },
   };
 }
 
@@ -680,8 +866,9 @@ module.exports = {
   refresh,
   logout,
   getActiveUserById,
+  isSuperadminEmail,
   validateInvitation,
   acceptInvitation,
   checkPendingInvitationByEmail,
-  registerInvitedUser
+  registerInvitedUser,
 };

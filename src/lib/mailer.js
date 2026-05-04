@@ -253,37 +253,95 @@ async function sendWebsiteContentReviewOtpEmail({ env, to, fullName, otp }) {
   });
 }
 
-async function sendNotificationEmail({ body, env, title, to }) {
-  const tx = createTransporter(env);
+function buildNotificationHtml({ name, title, body, ctaUrl }) {
+  const ctaBlock = ctaUrl
+    ? `
+          <tr>
+            <td align="center" style="padding-bottom:30px;">
+              <a href="${escapeHtml(ctaUrl)}"
+                 style="background-color:#1a73e8; color:#ffffff; padding:14px 28px; text-decoration:none; border-radius:6px; font-size:16px; display:inline-block;">
+                Open in AHM App
+              </a>
+            </td>
+          </tr>
 
-  await tx.sendMail({
-    from: env.email.from,
-    to,
-    subject: title,
-    text: body,
-    html: `<!DOCTYPE html>
+          <tr>
+            <td style="font-size:14px; color:#777; line-height:1.6; padding-bottom:20px;">
+              If the button above does not work, you can copy and paste the following link into your browser:<br>
+              <span style="color:#1a73e8;">${escapeHtml(ctaUrl)}</span>
+            </td>
+          </tr>`
+    : '';
+
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8" />
   <title>${escapeHtml(title)}</title>
 </head>
 <body style="margin:0; padding:0; background-color:#f4f6f8; font-family: Arial, sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f8; padding: 32px 0;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f6f8; padding: 40px 0;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:8px; padding:32px;">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:8px; padding:40px;">
           <tr>
-            <td>
-              <h1 style="margin:0 0 16px; color:#111827; font-size:20px;">${escapeHtml(title)}</h1>
-              <p style="margin:0; color:#374151; font-size:14px; line-height:1.6;">${escapeHtml(body)}</p>
+            <td align="center" style="padding-bottom: 20px;">
+              <img src="https://cdn.prod.website-files.com/695060a70f86706055aaf7e5/696531eb7ecaf37fcfae560f_Frame%2010.png" alt="AHM App Logo" width="120" />
             </td>
           </tr>
+
+          <tr>
+            <td style="font-size:24px; font-weight:bold; color:#333; padding-bottom:20px;">
+              Hi ${escapeHtml(name)},
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:18px; font-weight:bold; color:#111827; padding-bottom:12px;">
+              ${escapeHtml(title)}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="font-size:16px; color:#555; line-height:1.6; padding-bottom:30px;">
+              ${escapeHtml(body)}
+            </td>
+          </tr>
+
+          ${ctaBlock}
+
+          <tr>
+            <td style="font-size:14px; color:#777; text-align:center;">
+              Thank you,<br>
+              <strong>AHM App Team</strong>
+            </td>
+          </tr>
+
         </table>
       </td>
     </tr>
   </table>
 </body>
-</html>`
+</html>`;
+}
+
+async function sendNotificationEmail({ body, ctaUrl, env, name, title, to }) {
+  const tx = createTransporter(env);
+  const recipientName = resolveInviteName(name, to);
+
+  await tx.sendMail({
+    from: env.email.from,
+    to,
+    subject: title,
+    text: ctaUrl
+      ? `Hi ${recipientName},\n\n${title}\n\n${body}\n\nOpen in AHM App: ${ctaUrl}\n\nAHM App Team`
+      : `Hi ${recipientName},\n\n${title}\n\n${body}\n\nAHM App Team`,
+    html: buildNotificationHtml({
+      body,
+      ctaUrl,
+      name: recipientName,
+      title,
+    }),
   });
 }
 
