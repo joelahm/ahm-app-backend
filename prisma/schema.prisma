@@ -27,6 +27,18 @@ model AppSetting {
   @@map("app_settings")
 }
 
+model UrlPreview {
+  urlHash     String   @id @db.VarChar(64)
+  url         String   @db.Text
+  title       String?  @db.VarChar(500)
+  description String?  @db.Text
+  image       String?  @db.VarChar(1000)
+  siteName    String?  @map("site_name") @db.VarChar(255)
+  fetchedAt   DateTime @default(now()) @map("fetched_at")
+
+  @@map("url_previews")
+}
+
 model User {
   id                BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
   email             String         @unique(map: "uq_users_email") @db.VarChar(255)
@@ -65,6 +77,10 @@ model User {
   assignedProjectTasks         ProjectTask[]   @relation("ProjectTaskAssignedTo")
   createdProjectTasks          ProjectTask[]   @relation("ProjectTaskCreatedBy")
   taskComments                 TaskComment[]   @relation("TaskCommentCreatedBy")
+  taskAttachmentsUploaded      TaskAttachment[] @relation("TaskAttachmentUploadedBy")
+  taskChecklistsCreated        TaskChecklist[] @relation("TaskChecklistCreatedBy")
+  taskChecklistItemsCompleted  TaskChecklistItem[] @relation("TaskChecklistItemCompletedBy")
+  taskActivities               TaskActivity[] @relation("TaskActivityActor")
   projectComments              ProjectComment[] @relation("ProjectCommentCreatedBy")
   receivedNotifications        Notification[] @relation("NotificationRecipient")
   actedNotifications           Notification[] @relation("NotificationActor")
@@ -269,6 +285,8 @@ model ClientProject {
   dueDate                DateTime? @map("due_date")
   phase                  String   @db.VarChar(120)
   progress               String   @db.VarChar(120)
+  description            String?  @db.LongText
+  descriptionJson        Json?    @map("description_json")
   createdBy              BigInt?  @map("created_by") @db.UnsignedBigInt
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
@@ -292,6 +310,7 @@ model ProjectTemplate {
   id          String   @id @db.VarChar(64)
   projectName String   @map("project_name") @db.VarChar(180)
   description String   @db.LongText
+  descriptionJson Json? @map("description_json")
   status      String   @db.VarChar(64)
   tasks       Json
   createdBy   BigInt?  @map("created_by") @db.UnsignedBigInt
@@ -340,6 +359,7 @@ model ProjectTask {
   task        String    @db.VarChar(180)
   projectType String?   @map("project_type") @db.VarChar(120)
   description String?   @db.Text
+  descriptionJson Json?  @map("description_json")
   status      String    @default("TODO") @db.VarChar(64)
   priority    String    @default("MEDIUM") @db.VarChar(64)
   startDate   DateTime? @map("start_date")
@@ -361,6 +381,9 @@ model ProjectTask {
   assignedUser User?        @relation("ProjectTaskAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull, map: "fk_project_tasks_assigned_to")
   creator      User?        @relation("ProjectTaskCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_project_tasks_created_by")
   comments     TaskComment[]
+  attachments  TaskAttachment[]
+  checklists   TaskChecklist[]
+  activities   TaskActivity[]
 
   @@index([projectId], map: "idx_project_tasks_project_id")
   @@index([parentTaskId], map: "idx_project_tasks_parent_task_id")
@@ -370,10 +393,65 @@ model ProjectTask {
   @@map("project_tasks")
 }
 
+model TaskAttachment {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  taskId      BigInt   @map("task_id") @db.UnsignedBigInt
+  filename    String   @db.VarChar(255)
+  mimeType    String   @map("mime_type") @db.VarChar(120)
+  sizeBytes   Int      @map("size_bytes")
+  storagePath String   @map("storage_path") @db.VarChar(500)
+  uploadedBy  BigInt?  @map("uploaded_by") @db.UnsignedBigInt
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  task     ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade, map: "fk_task_attachments_task")
+  uploader User?       @relation("TaskAttachmentUploadedBy", fields: [uploadedBy], references: [id], onDelete: SetNull, map: "fk_task_attachments_uploaded_by")
+
+  @@index([taskId], map: "idx_task_attachments_task_id")
+  @@index([uploadedBy], map: "idx_task_attachments_uploaded_by")
+  @@map("task_attachments")
+}
+
+model TaskChecklist {
+  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  taskId    BigInt   @map("task_id") @db.UnsignedBigInt
+  title     String   @db.VarChar(255)
+  position  Int      @default(0)
+  createdBy BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  task    ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade, map: "fk_task_checklists_task")
+  creator User?       @relation("TaskChecklistCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_task_checklists_created_by")
+  items   TaskChecklistItem[]
+
+  @@index([taskId], map: "idx_task_checklists_task_id")
+  @@map("task_checklists")
+}
+
+model TaskChecklistItem {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  checklistId BigInt    @map("checklist_id") @db.UnsignedBigInt
+  text        String    @db.VarChar(500)
+  isComplete  Boolean   @default(false) @map("is_complete")
+  completedAt DateTime? @map("completed_at")
+  completedBy BigInt?   @map("completed_by") @db.UnsignedBigInt
+  position    Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  checklist TaskChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade, map: "fk_task_checklist_items_checklist")
+  completer User?         @relation("TaskChecklistItemCompletedBy", fields: [completedBy], references: [id], onDelete: SetNull, map: "fk_task_checklist_items_completed_by")
+
+  @@index([checklistId], map: "idx_task_checklist_items_checklist_id")
+  @@map("task_checklist_items")
+}
+
 model TaskComment {
   id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
   taskId    BigInt   @map("task_id") @db.UnsignedBigInt
   comment   String   @db.Text
+  bodyJson  Json?    @map("body_json")
   createdBy BigInt   @map("created_by") @db.UnsignedBigInt
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -384,6 +462,22 @@ model TaskComment {
   @@index([taskId], map: "idx_task_comments_task_id")
   @@index([createdBy], map: "idx_task_comments_created_by")
   @@map("task_comments")
+}
+
+model TaskActivity {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  taskId       BigInt   @map("task_id") @db.UnsignedBigInt
+  actorUserId  BigInt?  @map("actor_user_id") @db.UnsignedBigInt
+  type         String   @db.VarChar(64)
+  metadataJson Json?    @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  task  ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade, map: "fk_task_activities_task")
+  actor User?       @relation("TaskActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull, map: "fk_task_activities_actor")
+
+  @@index([taskId, createdAt], map: "idx_task_activities_task_created")
+  @@index([actorUserId], map: "idx_task_activities_actor_user_id")
+  @@map("task_activities")
 }
 
 model Notification {

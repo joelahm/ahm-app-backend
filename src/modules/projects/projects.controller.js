@@ -43,6 +43,30 @@ function readCommentId(req) {
   return id;
 }
 
+function readAttachmentId(req) {
+  const id = Number(req.params.attachmentId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid attachment id.');
+  }
+  return id;
+}
+
+function readChecklistId(req) {
+  const id = Number(req.params.checklistId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid checklist id.');
+  }
+  return id;
+}
+
+function readChecklistItemId(req) {
+  const id = Number(req.params.itemId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Invalid checklist item id.');
+  }
+  return id;
+}
+
 async function createProjectTask(req, res, next) {
   try {
     const projectId = readProjectId(req);
@@ -73,6 +97,16 @@ async function createProjectTask(req, res, next) {
       io: req.app.locals.io,
       taskId: task.id
     });
+
+    if (task.parentTaskId && task.assignedToId) {
+      await notificationsService.notifyTaskSubtaskAssigned({
+        actorUserId: req.auth.userId,
+        db: req.app.locals.db,
+        env: req.app.locals.env,
+        io: req.app.locals.io,
+        subtaskId: task.id
+      });
+    }
 
     res.status(201).json({ task });
   } catch (err) {
@@ -111,6 +145,16 @@ async function createProjectTaskFromBody(req, res, next) {
       taskId: task.id
     });
 
+    if (task.parentTaskId && task.assignedToId) {
+      await notificationsService.notifyTaskSubtaskAssigned({
+        actorUserId: req.auth.userId,
+        db: req.app.locals.db,
+        env: req.app.locals.env,
+        io: req.app.locals.io,
+        subtaskId: task.id
+      });
+    }
+
     res.status(201).json({ task });
   } catch (err) {
     next(err);
@@ -125,11 +169,13 @@ async function updateProjectTask(req, res, next) {
       select: {
         assignedTo: true,
         id: true,
+        parentTaskId: true,
         status: true
       }
     });
     const task = await projectsService.updateTask({
       db: req.app.locals.db,
+      actorUserId: req.auth.userId,
       taskId,
       payload: req.body || {}
     });
@@ -157,6 +203,16 @@ async function updateProjectTask(req, res, next) {
         io: req.app.locals.io,
         taskId: task.id
       });
+
+      if (task.parentTaskId) {
+        await notificationsService.notifyTaskSubtaskAssigned({
+          actorUserId: req.auth.userId,
+          db: req.app.locals.db,
+          env: req.app.locals.env,
+          io: req.app.locals.io,
+          subtaskId: task.id
+        });
+      }
     }
 
     await notificationsService.notifyTaskStatusChanged({
@@ -219,6 +275,193 @@ async function deleteProjectTask(req, res, next) {
       action: 'TASK_DELETED',
       resourceType: 'project_task',
       resourceId: taskId
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function uploadTaskAttachment(req, res, next) {
+  try {
+    const taskId = readTaskId(req);
+    const attachment = await projectsService.createTaskAttachment({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      file: req.file,
+      taskId
+    });
+
+    await notificationsService.notifyTaskAttachmentAdded({
+      actorUserId: req.auth.userId,
+      attachment,
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      io: req.app.locals.io,
+      taskId
+    });
+
+    res.status(200).json({ attachment });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listTaskAttachments(req, res, next) {
+  try {
+    const taskId = readTaskId(req);
+    const attachments = await projectsService.listTaskAttachments({
+      db: req.app.locals.db,
+      taskId
+    });
+
+    res.status(200).json({
+      attachments,
+      total: attachments.length
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteTaskAttachment(req, res, next) {
+  try {
+    const attachmentId = readAttachmentId(req);
+    await projectsService.deleteTaskAttachment({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      attachmentId
+    });
+
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listChecklists(req, res, next) {
+  try {
+    const taskId = readTaskId(req);
+    const checklists = await projectsService.listChecklists({
+      db: req.app.locals.db,
+      taskId
+    });
+
+    res.status(200).json({ checklists });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createChecklist(req, res, next) {
+  try {
+    const taskId = readTaskId(req);
+    const checklist = await projectsService.createChecklist({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      taskId,
+      payload: req.body || {}
+    });
+
+    res.status(201).json({ checklist });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateChecklist(req, res, next) {
+  try {
+    const checklistId = readChecklistId(req);
+    const checklist = await projectsService.updateChecklist({
+      db: req.app.locals.db,
+      checklistId,
+      payload: req.body || {}
+    });
+
+    res.status(200).json({ checklist });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteChecklist(req, res, next) {
+  try {
+    const checklistId = readChecklistId(req);
+    const data = await projectsService.deleteChecklist({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      checklistId
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function createChecklistItem(req, res, next) {
+  try {
+    const checklistId = readChecklistId(req);
+    const item = await projectsService.createChecklistItem({
+      db: req.app.locals.db,
+      checklistId,
+      payload: req.body || {}
+    });
+
+    res.status(201).json({ item });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function updateChecklistItem(req, res, next) {
+  try {
+    const itemId = readChecklistItemId(req);
+    const previousItem = await req.app.locals.db.taskChecklistItem.findUnique({
+      where: { id: BigInt(itemId) },
+      include: {
+        checklist: {
+          select: {
+            taskId: true
+          }
+        }
+      }
+    });
+    const item = await projectsService.updateChecklistItem({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      itemId,
+      payload: req.body || {}
+    });
+
+    if (
+      previousItem &&
+      previousItem.isComplete === false &&
+      item.isComplete === true
+    ) {
+      await notificationsService.notifyTaskChecklistItemCompleted({
+        actorUserId: req.auth.userId,
+        db: req.app.locals.db,
+        env: req.app.locals.env,
+        io: req.app.locals.io,
+        item,
+        taskId: previousItem.checklist.taskId
+      });
+    }
+
+    res.status(200).json({ item });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteChecklistItem(req, res, next) {
+  try {
+    const itemId = readChecklistItemId(req);
+    const data = await projectsService.deleteChecklistItem({
+      db: req.app.locals.db,
+      itemId
     });
 
     res.status(200).json(data);
@@ -305,6 +548,22 @@ async function deleteTaskComment(req, res, next) {
   }
 }
 
+async function listTaskActivity(req, res, next) {
+  try {
+    const taskId = readTaskId(req);
+    const data = await projectsService.listTaskActivity({
+      db: req.app.locals.db,
+      taskId,
+      before: req.query.before,
+      limit: req.query.limit
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function createProjectComment(req, res, next) {
   try {
     const projectId = readProjectIdParam(req);
@@ -381,9 +640,20 @@ module.exports = {
   createProjectTaskFromBody,
   updateProjectTask,
   deleteProjectTask,
+  uploadTaskAttachment,
+  listTaskAttachments,
+  deleteTaskAttachment,
+  listChecklists,
+  createChecklist,
+  updateChecklist,
+  deleteChecklist,
+  createChecklistItem,
+  updateChecklistItem,
+  deleteChecklistItem,
   createTaskComment,
   listTaskComments,
   deleteTaskComment,
+  listTaskActivity,
   createProjectComment,
   listProjectComments,
   deleteProjectComment

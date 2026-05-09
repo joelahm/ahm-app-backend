@@ -846,6 +846,107 @@ async function notifyTaskCommentCreated({ actorUserId, comment, db, env, io, tas
   });
 }
 
+async function notifyTaskAttachmentAdded({ actorUserId, attachment, db, env, io, taskId }) {
+  const task = await getTaskContext({ db, taskId });
+
+  if (!task) {
+    return [];
+  }
+
+  const recipients = uniqueRecipientList([task.assignedTo, task.createdBy], actorUserId);
+  if (recipients.length === 0) {
+    return [];
+  }
+
+  const data = {
+    ...buildTaskData(task),
+    attachmentId: attachment?.id ? Number(attachment.id) : null,
+    filename: attachment?.filename ?? null
+  };
+
+  return notify({
+    actorUserId,
+    body: `"${attachment?.filename || 'A file'}" was attached to "${task.task}".`,
+    category: 'OTHER',
+    data,
+    db,
+    discordScope: 'personal',
+    entity: { id: task.id, type: 'task' },
+    env,
+    io,
+    recipientUserIds: recipients,
+    severity: 'INFO',
+    title: 'Attachment added',
+    type: 'TASK_ATTACHMENT_ADDED'
+  });
+}
+
+async function notifyTaskChecklistItemCompleted({ actorUserId, db, env, io, item, taskId }) {
+  const task = await getTaskContext({ db, taskId });
+
+  if (!task) {
+    return [];
+  }
+
+  const recipients = uniqueRecipientList([task.createdBy], actorUserId);
+  if (recipients.length === 0) {
+    return [];
+  }
+
+  const data = {
+    ...buildTaskData(task),
+    checklistItemId: item?.id ? Number(item.id) : null,
+    text: item?.text ?? null
+  };
+
+  return notify({
+    actorUserId,
+    body: `Checklist item "${item?.text || 'item'}" was completed on "${task.task}".`,
+    category: 'OTHER',
+    data,
+    db,
+    discordScope: 'personal',
+    entity: { id: task.id, type: 'task' },
+    env,
+    io,
+    recipientUserIds: recipients,
+    severity: 'INFO',
+    title: 'Checklist item completed',
+    type: 'TASK_CHECKLIST_ITEM_COMPLETED'
+  });
+}
+
+async function notifyTaskSubtaskAssigned({ actorUserId, db, env, io, subtaskId }) {
+  const subtask = await getTaskContext({ db, taskId: subtaskId });
+
+  if (!subtask?.assignedTo) {
+    return [];
+  }
+
+  const recipients = uniqueRecipientList([subtask.assignedTo], actorUserId);
+  if (recipients.length === 0) {
+    return [];
+  }
+
+  const data = buildTaskData(subtask);
+
+  return notify({
+    actorUserId,
+    body: `You were assigned the subtask "${subtask.task}".`,
+    category: 'IMPORTANT',
+    data,
+    db,
+    discordScope: 'personal',
+    entity: { id: subtask.id, type: 'task' },
+    env,
+    io,
+    recipientUserIds: recipients,
+    severity: 'INFO',
+    title: 'Subtask assigned',
+    type: 'TASK_SUBTASK_ASSIGNED'
+  });
+}
+
 function buildClientProjectData(project) {
   const clientId = project.clientId ? Number(project.clientId) : null;
   return {
@@ -1016,8 +1117,11 @@ module.exports = {
   notifyProjectAssigned,
   notifyProjectStartDateChanged,
   notifyProjectStatusChanged,
+  notifyTaskAttachmentAdded,
   notifyTaskAssigned,
+  notifyTaskChecklistItemCompleted,
   notifyTaskCommentCreated,
   notifyTaskStatusChanged,
+  notifyTaskSubtaskAssigned,
   updateSettings
 };

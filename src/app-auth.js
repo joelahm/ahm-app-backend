@@ -24,6 +24,7 @@ const { generatedSchemasRouter } = require('./modules/generated-schemas/generate
 const { keywordContentListsRouter } = require('./modules/keyword-content-lists/keyword-content-lists.routes');
 const { websiteContentReviewsRouter } = require('./modules/website-content-reviews/website-content-reviews.routes');
 const { notificationsRouter } = require('./modules/notifications/notifications.routes');
+const { urlPreviewRouter } = require('./modules/url-preview/url-preview.routes');
 const { healthRouter } = require('./modules/health/health.routes');
 const { notFoundHandler } = require('./middleware/notFoundHandler');
 const { errorHandler } = require('./middleware/errorHandler');
@@ -98,6 +99,7 @@ function createAuthApp() {
   app.use('/api/v1/keyword-content-lists', keywordContentListsRouter);
   app.use('/api/v1/website-content-reviews', websiteContentReviewsRouter);
   app.use('/api/v1/notifications', notificationsRouter);
+  app.use('/api/v1/url-preview', urlPreviewRouter);
   app.use('/api/v1', healthRouter);
 
   app.use(notFoundHandler);

@@ -1,4 +1,14 @@
+const fs = require("fs/promises");
+const path = require("path");
 const { AppError } = require("../../lib/errors");
+const {
+  TASK_ACTIVITY_TYPES,
+  recordTaskActivity,
+} = require("../../lib/task-activity");
+const {
+  proseMirrorToPlainText,
+  validateDescriptionJson,
+} = require("../../lib/prosemirror");
 const DEFAULT_TASK_STATUSES = [
   "To Do",
   "In Progress",
@@ -479,6 +489,7 @@ function mapTask(task) {
     taskName: task.task,
     projectType: task.projectType ?? null,
     description: task.description ?? null,
+    descriptionJson: task.descriptionJson ?? null,
     status: task.status,
     priority: task.priority,
     startDate: task.startDate,
@@ -501,6 +512,8 @@ function mapComment(comment) {
   return {
     id: Number(comment.id),
     taskId: Number(comment.taskId),
+    body: comment.comment,
+    bodyJson: comment.bodyJson ?? null,
     comment: comment.comment,
     createdBy: Number(comment.createdBy),
     author: comment.creator
@@ -514,6 +527,56 @@ function mapComment(comment) {
     createdAt: comment.createdAt,
     updatedAt: comment.updatedAt,
   };
+}
+
+function mapTaskAttachment(attachment) {
+  return {
+    id: Number(attachment.id),
+    taskId: Number(attachment.taskId),
+    filename: attachment.filename,
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+    url: `/uploads/task-attachments/${Number(attachment.taskId)}/${attachment.filename}`,
+    uploadedBy: attachment.uploadedBy ? Number(attachment.uploadedBy) : null,
+    createdAt: attachment.createdAt,
+  };
+}
+
+function mapChecklistItem(item) {
+  return {
+    id: Number(item.id),
+    checklistId: Number(item.checklistId),
+    text: item.text,
+    isComplete: Boolean(item.isComplete),
+    completedAt: item.completedAt ?? null,
+    completedBy: item.completedBy ? Number(item.completedBy) : null,
+    position: item.position,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+}
+
+function mapChecklist(checklist) {
+  return {
+    id: Number(checklist.id),
+    taskId: Number(checklist.taskId),
+    title: checklist.title,
+    position: checklist.position,
+    createdBy: checklist.createdBy ? Number(checklist.createdBy) : null,
+    createdAt: checklist.createdAt,
+    updatedAt: checklist.updatedAt,
+    items: Array.isArray(checklist.items)
+      ? checklist.items.map(mapChecklistItem)
+      : [],
+  };
+}
+
+function toIsoOrNull(value) {
+  return value ? new Date(value).toISOString() : null;
+}
+
+function idsEqual(left, right) {
+  return String(left ?? "") === String(right ?? "");
 }
 
 function mapProjectComment(comment) {
@@ -541,10 +604,20 @@ async function createTask({ db, actorUserId, projectId, payload }) {
     payload.projectType === undefined
       ? null
       : String(payload.projectType || "").trim() || null;
+  let descriptionJson = null;
+  if (payload.descriptionJson !== undefined) {
+    try {
+      descriptionJson = validateDescriptionJson(payload.descriptionJson);
+    } catch (err) {
+      throw new AppError(400, "VALIDATION_ERROR", err.message);
+    }
+  }
   const description =
-    payload.description === undefined
-      ? null
-      : String(payload.description || "").trim() || null;
+    descriptionJson !== null
+      ? proseMirrorToPlainText(descriptionJson)
+      : payload.description === undefined
+        ? null
+        : String(payload.description || "").trim() || null;
   const status = await parseTaskStatus(db, payload.status);
   const priority =
     payload.priority === undefined
@@ -646,6 +719,7 @@ async function createTask({ db, actorUserId, projectId, payload }) {
         task: taskName,
         projectType,
         description,
+        descriptionJson: descriptionJson ?? undefined,
         status,
         priority,
         startDate,
@@ -660,6 +734,11 @@ async function createTask({ db, actorUserId, projectId, payload }) {
         createdBy: BigInt(actorUserId),
       },
       include: {
+        _count: {
+          select: {
+            subtasks: true,
+          },
+        },
         assignedUser: {
           select: {
             id: true,
@@ -681,18 +760,33 @@ async function createTask({ db, actorUserId, projectId, payload }) {
     throw err;
   }
 
+  if (parentTaskId) {
+    await recordTaskActivity({
+      actorUserId,
+      db,
+      metadata: { subtaskId: Number(created.id), title: created.task },
+      taskId: parentTaskId,
+      type: TASK_ACTIVITY_TYPES.SUBTASK_ADDED,
+    });
+  }
+
   return mapTask(created);
 }
 
-async function updateTask({ db, taskId, payload }) {
+async function updateTask({ actorUserId, db, taskId, payload }) {
   const existingTask = await db.projectTask.findUnique({
     where: { id: BigInt(taskId) },
     select: {
+      assignedTo: true,
       blockedTaskId: true,
+      dueDate: true,
       dueDateOffsetDays: true,
       dueDateRuleType: true,
       id: true,
+      parentTaskId: true,
+      priority: true,
       projectId: true,
+      status: true,
     },
   });
 
@@ -708,10 +802,20 @@ async function updateTask({ db, taskId, payload }) {
     payload.projectType === undefined
       ? undefined
       : String(payload.projectType || "").trim() || null;
+  let descriptionJson;
+  if (payload.descriptionJson !== undefined) {
+    try {
+      descriptionJson = validateDescriptionJson(payload.descriptionJson);
+    } catch (err) {
+      throw new AppError(400, "VALIDATION_ERROR", err.message);
+    }
+  }
   const description =
-    payload.description === undefined
-      ? undefined
-      : String(payload.description || "").trim() || null;
+    descriptionJson !== undefined
+      ? proseMirrorToPlainText(descriptionJson) || null
+      : payload.description === undefined
+        ? undefined
+        : String(payload.description || "").trim() || null;
   const status =
     payload.status === undefined
       ? undefined
@@ -877,6 +981,7 @@ async function updateTask({ db, taskId, payload }) {
     projectId: nextProjectId === undefined ? undefined : BigInt(nextProjectId),
     projectType,
     description,
+    descriptionJson,
     status,
     priority,
     startDate,
@@ -911,6 +1016,11 @@ async function updateTask({ db, taskId, payload }) {
       where: { id: BigInt(taskId) },
       data: patch,
       include: {
+        _count: {
+          select: {
+            subtasks: true,
+          },
+        },
         assignedUser: {
           select: {
             id: true,
@@ -937,6 +1047,65 @@ async function updateTask({ db, taskId, payload }) {
       db,
       projectId: updated.projectId,
       rootTaskId: updated.id,
+    });
+  }
+
+  if (status !== undefined && existingTask.status !== updated.status) {
+    await recordTaskActivity({
+      actorUserId,
+      db,
+      metadata: { from: existingTask.status, to: updated.status },
+      taskId,
+      type: TASK_ACTIVITY_TYPES.STATUS_CHANGED,
+    });
+  }
+
+  if (assignedTo !== undefined && !idsEqual(existingTask.assignedTo, updated.assignedTo)) {
+    await recordTaskActivity({
+      actorUserId,
+      db,
+      metadata: {
+        fromUserId: existingTask.assignedTo ? Number(existingTask.assignedTo) : null,
+        toUserId: updated.assignedTo ? Number(updated.assignedTo) : null,
+      },
+      taskId,
+      type: TASK_ACTIVITY_TYPES.ASSIGNEE_CHANGED,
+    });
+  }
+
+  if (dueDate !== undefined && toIsoOrNull(existingTask.dueDate) !== toIsoOrNull(updated.dueDate)) {
+    await recordTaskActivity({
+      actorUserId,
+      db,
+      metadata: {
+        from: toIsoOrNull(existingTask.dueDate),
+        to: toIsoOrNull(updated.dueDate),
+      },
+      taskId,
+      type: TASK_ACTIVITY_TYPES.DUE_DATE_CHANGED,
+    });
+  }
+
+  if (priority !== undefined && existingTask.priority !== updated.priority) {
+    await recordTaskActivity({
+      actorUserId,
+      db,
+      metadata: { from: existingTask.priority, to: updated.priority },
+      taskId,
+      type: TASK_ACTIVITY_TYPES.PRIORITY_CHANGED,
+    });
+  }
+
+  if (parentTaskId !== undefined && !idsEqual(existingTask.parentTaskId, updated.parentTaskId)) {
+    await recordTaskActivity({
+      actorUserId,
+      db,
+      metadata: {
+        fromTaskId: existingTask.parentTaskId ? Number(existingTask.parentTaskId) : null,
+        toTaskId: updated.parentTaskId ? Number(updated.parentTaskId) : null,
+      },
+      taskId,
+      type: TASK_ACTIVITY_TYPES.PARENT_CHANGED,
     });
   }
 
@@ -986,6 +1155,11 @@ async function listTasksGroupedByProject({ db, clientId, actorUserId, actorRole 
           avatarUrl: true,
         },
       },
+      _count: {
+        select: {
+          subtasks: true,
+        },
+      },
     },
     orderBy: [{ projectId: "asc" }, { id: "desc" }],
   });
@@ -1027,8 +1201,393 @@ async function deleteTask({ db, taskId }) {
   return { success: true };
 }
 
+async function createTaskAttachment({ db, actorUserId, file, taskId }) {
+  if (!file) {
+    throw new AppError(400, "VALIDATION_ERROR", "file is required.");
+  }
+
+  const taskExists = await db.projectTask.findUnique({
+    where: { id: BigInt(taskId) },
+    select: { id: true },
+  });
+  if (!taskExists) {
+    throw new AppError(404, "NOT_FOUND", "Task not found.");
+  }
+
+  const storagePath = path
+    .join("public", "uploads", "task-attachments", String(taskId), file.filename)
+    .replace(/\\/g, "/");
+
+  const created = await db.taskAttachment.create({
+    data: {
+      taskId: BigInt(taskId),
+      filename: file.filename,
+      mimeType: file.mimetype,
+      sizeBytes: file.size,
+      storagePath,
+      uploadedBy: actorUserId ? BigInt(actorUserId) : null,
+    },
+  });
+
+  await recordTaskActivity({
+    actorUserId,
+    db,
+    metadata: { attachmentId: Number(created.id), filename: created.filename },
+    taskId,
+    type: TASK_ACTIVITY_TYPES.ATTACHMENT_ADDED,
+  });
+
+  return mapTaskAttachment(created);
+}
+
+async function listTaskAttachments({ db, taskId }) {
+  const taskExists = await db.projectTask.findUnique({
+    where: { id: BigInt(taskId) },
+    select: { id: true },
+  });
+  if (!taskExists) {
+    throw new AppError(404, "NOT_FOUND", "Task not found.");
+  }
+
+  const attachments = await db.taskAttachment.findMany({
+    where: { taskId: BigInt(taskId) },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return attachments.map(mapTaskAttachment);
+}
+
+async function deleteTaskAttachment({ actorUserId, db, attachmentId }) {
+  let attachment;
+  try {
+    attachment = await db.taskAttachment.delete({
+      where: { id: BigInt(attachmentId) },
+    });
+  } catch (err) {
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "Attachment not found.");
+    }
+    throw err;
+  }
+
+  const absolutePath = path.join(process.cwd(), attachment.storagePath);
+  try {
+    await fs.unlink(absolutePath);
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      throw err;
+    }
+  }
+
+  await recordTaskActivity({
+    actorUserId,
+    db,
+    metadata: {
+      attachmentId: Number(attachment.id),
+      filename: attachment.filename,
+    },
+    taskId: attachment.taskId,
+    type: TASK_ACTIVITY_TYPES.ATTACHMENT_REMOVED,
+  });
+
+  return { success: true };
+}
+
+async function listChecklists({ db, taskId }) {
+  const taskExists = await db.projectTask.findUnique({
+    where: { id: BigInt(taskId) },
+    select: { id: true },
+  });
+  if (!taskExists) {
+    throw new AppError(404, "NOT_FOUND", "Task not found.");
+  }
+
+  const checklists = await db.taskChecklist.findMany({
+    where: { taskId: BigInt(taskId) },
+    include: {
+      items: {
+        orderBy: { position: "asc" },
+      },
+    },
+    orderBy: { position: "asc" },
+  });
+
+  return checklists.map(mapChecklist);
+}
+
+async function createChecklist({ db, actorUserId, taskId, payload }) {
+  const title = String(payload.title || "Checklist").trim();
+  if (!title) {
+    throw new AppError(400, "VALIDATION_ERROR", "title is required.");
+  }
+
+  const taskExists = await db.projectTask.findUnique({
+    where: { id: BigInt(taskId) },
+    select: { id: true },
+  });
+  if (!taskExists) {
+    throw new AppError(404, "NOT_FOUND", "Task not found.");
+  }
+
+  const position =
+    payload.position === undefined ? 0 : Number(payload.position);
+  if (!Number.isInteger(position) || position < 0) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "position must be a non-negative integer.",
+    );
+  }
+
+  const created = await db.taskChecklist.create({
+    data: {
+      taskId: BigInt(taskId),
+      title,
+      position,
+      createdBy: actorUserId ? BigInt(actorUserId) : null,
+    },
+    include: {
+      items: true,
+    },
+  });
+
+  await recordTaskActivity({
+    actorUserId,
+    db,
+    metadata: { checklistId: Number(created.id), title: created.title },
+    taskId,
+    type: TASK_ACTIVITY_TYPES.CHECKLIST_CREATED,
+  });
+
+  return mapChecklist(created);
+}
+
+async function updateChecklist({ db, checklistId, payload }) {
+  const patch = {};
+
+  if (payload.title !== undefined) {
+    const title = String(payload.title || "").trim();
+    if (!title) {
+      throw new AppError(400, "VALIDATION_ERROR", "title is required.");
+    }
+    patch.title = title;
+  }
+
+  if (payload.position !== undefined) {
+    const position = Number(payload.position);
+    if (!Number.isInteger(position) || position < 0) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "position must be a non-negative integer.",
+      );
+    }
+    patch.position = position;
+  }
+
+  if (!Object.keys(patch).length) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "No supported fields to update.",
+    );
+  }
+
+  try {
+    const updated = await db.taskChecklist.update({
+      where: { id: BigInt(checklistId) },
+      data: patch,
+      include: {
+        items: {
+          orderBy: { position: "asc" },
+        },
+      },
+    });
+
+    return mapChecklist(updated);
+  } catch (err) {
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "Checklist not found.");
+    }
+    throw err;
+  }
+}
+
+async function deleteChecklist({ actorUserId, db, checklistId }) {
+  let checklist;
+  try {
+    checklist = await db.taskChecklist.delete({
+      where: { id: BigInt(checklistId) },
+    });
+  } catch (err) {
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "Checklist not found.");
+    }
+    throw err;
+  }
+
+  await recordTaskActivity({
+    actorUserId,
+    db,
+    metadata: {
+      checklistId: Number(checklist.id),
+      title: checklist.title,
+    },
+    taskId: checklist.taskId,
+    type: TASK_ACTIVITY_TYPES.CHECKLIST_DELETED,
+  });
+
+  return { success: true };
+}
+
+async function createChecklistItem({ db, checklistId, payload }) {
+  const text = String(payload.text || "").trim();
+  if (!text) {
+    throw new AppError(400, "VALIDATION_ERROR", "text is required.");
+  }
+
+  const checklistExists = await db.taskChecklist.findUnique({
+    where: { id: BigInt(checklistId) },
+    select: { id: true },
+  });
+  if (!checklistExists) {
+    throw new AppError(404, "NOT_FOUND", "Checklist not found.");
+  }
+
+  const position =
+    payload.position === undefined ? 0 : Number(payload.position);
+  if (!Number.isInteger(position) || position < 0) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "position must be a non-negative integer.",
+    );
+  }
+
+  const created = await db.taskChecklistItem.create({
+    data: {
+      checklistId: BigInt(checklistId),
+      text,
+      position,
+    },
+  });
+
+  return mapChecklistItem(created);
+}
+
+async function updateChecklistItem({ db, actorUserId, itemId, payload }) {
+  const existingItem = await db.taskChecklistItem.findUnique({
+    where: { id: BigInt(itemId) },
+    include: {
+      checklist: {
+        select: {
+          taskId: true,
+        },
+      },
+    },
+  });
+
+  if (!existingItem) {
+    throw new AppError(404, "NOT_FOUND", "Checklist item not found.");
+  }
+
+  const patch = {};
+
+  if (payload.text !== undefined) {
+    const text = String(payload.text || "").trim();
+    if (!text) {
+      throw new AppError(400, "VALIDATION_ERROR", "text is required.");
+    }
+    patch.text = text;
+  }
+
+  if (payload.position !== undefined) {
+    const position = Number(payload.position);
+    if (!Number.isInteger(position) || position < 0) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "position must be a non-negative integer.",
+      );
+    }
+    patch.position = position;
+  }
+
+  if (payload.isComplete !== undefined) {
+    const isComplete = Boolean(payload.isComplete);
+
+    patch.isComplete = isComplete;
+    patch.completedAt = isComplete ? new Date() : null;
+    patch.completedBy = isComplete && actorUserId ? BigInt(actorUserId) : null;
+  }
+
+  if (!Object.keys(patch).length) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "No supported fields to update.",
+    );
+  }
+
+  try {
+    const updated = await db.taskChecklistItem.update({
+      where: { id: BigInt(itemId) },
+      data: patch,
+    });
+
+    if (
+      payload.isComplete !== undefined &&
+      existingItem.isComplete !== updated.isComplete
+    ) {
+      await recordTaskActivity({
+        actorUserId,
+        db,
+        metadata: { itemId: Number(updated.id), text: updated.text },
+        taskId: existingItem.checklist.taskId,
+        type: updated.isComplete
+          ? TASK_ACTIVITY_TYPES.CHECKLIST_ITEM_COMPLETED
+          : TASK_ACTIVITY_TYPES.CHECKLIST_ITEM_REOPENED,
+      });
+    }
+
+    return mapChecklistItem(updated);
+  } catch (err) {
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "Checklist item not found.");
+    }
+    throw err;
+  }
+}
+
+async function deleteChecklistItem({ db, itemId }) {
+  try {
+    await db.taskChecklistItem.delete({
+      where: { id: BigInt(itemId) },
+    });
+  } catch (err) {
+    if (err.code === "P2025") {
+      throw new AppError(404, "NOT_FOUND", "Checklist item not found.");
+    }
+    throw err;
+  }
+
+  return { success: true };
+}
+
 async function createTaskComment({ db, actorUserId, taskId, payload }) {
-  const text = String(payload.comment || "").trim();
+  let bodyJson = null;
+  if (payload.bodyJson !== undefined) {
+    try {
+      bodyJson = validateDescriptionJson(payload.bodyJson);
+    } catch (err) {
+      throw new AppError(400, "VALIDATION_ERROR", err.message);
+    }
+  }
+  const text =
+    bodyJson !== null
+      ? proseMirrorToPlainText(bodyJson)
+      : String(payload.comment || "").trim();
+
   if (!text) {
     throw new AppError(400, "VALIDATION_ERROR", "comment is required.");
   }
@@ -1045,6 +1604,7 @@ async function createTaskComment({ db, actorUserId, taskId, payload }) {
     data: {
       taskId: BigInt(taskId),
       comment: text,
+      bodyJson: bodyJson ?? undefined,
       createdBy: BigInt(actorUserId),
     },
     include: {
@@ -1111,6 +1671,128 @@ async function deleteTaskComment({ db, actorUserId, commentId }) {
   });
 
   return { success: true };
+}
+
+function mapActivityUser(user) {
+  if (!user) return null;
+
+  const name = [user.firstName, user.lastName]
+    .map((value) => value?.trim() || "")
+    .filter(Boolean)
+    .join(" ");
+
+  return {
+    id: Number(user.id),
+    name: name || user.email || "User",
+    avatarUrl: user.avatarUrl ?? null,
+  };
+}
+
+async function listTaskActivity({ before, db, limit = 50, taskId }) {
+  const taskExists = await db.projectTask.findUnique({
+    where: { id: BigInt(taskId) },
+    select: { id: true },
+  });
+
+  if (!taskExists) {
+    throw new AppError(404, "NOT_FOUND", "Task not found.");
+  }
+
+  const parsedLimit = Number(limit);
+  const safeLimit =
+    Number.isInteger(parsedLimit) && parsedLimit > 0
+      ? Math.min(parsedLimit, 100)
+      : 50;
+  let beforeDate = null;
+
+  if (before) {
+    beforeDate = new Date(before);
+    if (Number.isNaN(beforeDate.getTime())) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "before must be a valid ISO date.",
+      );
+    }
+  }
+
+  const createdAtFilter = beforeDate ? { lt: beforeDate } : undefined;
+  const [comments, activities] = await Promise.all([
+    db.taskComment.findMany({
+      where: {
+        taskId: BigInt(taskId),
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: safeLimit + 1,
+    }),
+    db.taskActivity.findMany({
+      where: {
+        taskId: BigInt(taskId),
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: safeLimit + 1,
+    }),
+  ]);
+
+  const userIds = Array.from(
+    new Set(
+      [
+        ...comments.map((comment) => comment.createdBy),
+        ...activities.map((activity) => activity.actorUserId),
+      ]
+        .filter(Boolean)
+        .map((id) => String(id)),
+    ),
+  );
+  const users = userIds.length
+    ? await db.user.findMany({
+        where: {
+          id: {
+            in: userIds.map((id) => BigInt(id)),
+          },
+        },
+        select: {
+          avatarUrl: true,
+          email: true,
+          firstName: true,
+          id: true,
+          lastName: true,
+        },
+      })
+    : [];
+  const usersById = new Map(users.map((user) => [String(user.id), user]));
+
+  const merged = [
+    ...comments.map((comment) => ({
+      kind: "comment",
+      id: Number(comment.id),
+      body: comment.comment,
+      bodyJson: comment.bodyJson ?? null,
+      createdAt: comment.createdAt,
+      createdBy: mapActivityUser(usersById.get(String(comment.createdBy))),
+    })),
+    ...activities.map((activity) => ({
+      kind: "event",
+      id: Number(activity.id),
+      type: activity.type,
+      metadata: activity.metadataJson ?? {},
+      createdAt: activity.createdAt,
+      actor: activity.actorUserId
+        ? mapActivityUser(usersById.get(String(activity.actorUserId)))
+        : null,
+    })),
+  ].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+
+  const items = merged.slice(0, safeLimit);
+  const hasMore = merged.length > safeLimit;
+  const oldest = items[items.length - 1];
+
+  return {
+    items,
+    cursor: hasMore && oldest ? new Date(oldest.createdAt).toISOString() : null,
+  };
 }
 
 async function createProjectComment({ db, actorUserId, projectId, payload }) {
@@ -1534,9 +2216,20 @@ module.exports = {
   updateTask,
   listTasksGroupedByProject,
   deleteTask,
+  createTaskAttachment,
+  listTaskAttachments,
+  deleteTaskAttachment,
+  listChecklists,
+  createChecklist,
+  updateChecklist,
+  deleteChecklist,
+  createChecklistItem,
+  updateChecklistItem,
+  deleteChecklistItem,
   createTaskComment,
   listTaskComments,
   deleteTaskComment,
+  listTaskActivity,
   createProjectComment,
   listProjectComments,
   deleteProjectComment,

@@ -80,6 +80,46 @@ function normalizeProjectStatus(value) {
   return "On Going";
 }
 
+function normalizeChecklist(value, index) {
+  const source = asObject(value);
+  const items = Array.isArray(source.items)
+    ? source.items
+        .map((item, itemIndex) => {
+          const itemSource = asObject(item);
+          const text = asString(itemSource.text).trim();
+          if (!text) return null;
+          return {
+            id: asString(itemSource.id) || `checklist-${index}-item-${itemIndex}`,
+            text,
+            isComplete: asBoolean(itemSource.isComplete),
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  return {
+    id: asString(source.id) || `checklist-${index + 1}`,
+    title: asString(source.title).trim() || `Checklist ${index + 1}`,
+    items,
+  };
+}
+
+function normalizeAttachment(value, index) {
+  const source = asObject(value);
+  const url = asString(source.url).trim();
+  const filename = asString(source.filename).trim();
+
+  if (!url || !filename) return null;
+
+  return {
+    id: asString(source.id) || `attachment-${index + 1}`,
+    filename,
+    url,
+    mimeType: asString(source.mimeType),
+    sizeBytes: asNumber(source.sizeBytes, 0),
+  };
+}
+
 function normalizeTask(value, index) {
   const source = asObject(value);
   const taskName = asString(source.taskName || source.title).trim();
@@ -90,12 +130,27 @@ function normalizeTask(value, index) {
     : asString(source.label).trim()
       ? [asString(source.label).trim()]
       : [];
+  const descriptionJson =
+    source.descriptionJson && typeof source.descriptionJson === "object"
+      ? source.descriptionJson
+      : null;
+  const checklists = Array.isArray(source.checklists)
+    ? source.checklists.map((item, itemIndex) => normalizeChecklist(item, itemIndex))
+    : [];
+  const attachments = Array.isArray(source.attachments)
+    ? source.attachments
+        .map((item, itemIndex) => normalizeAttachment(item, itemIndex))
+        .filter(Boolean)
+    : [];
 
   return {
     id: asString(source.id) || `task-${index + 1}`,
     taskName: taskName || `Task ${index + 1}`,
     taskDescription:
       asString(source.taskDescription || source.description) || "-",
+    descriptionJson,
+    checklists,
+    attachments,
     level: Math.max(0, Math.min(2, asNumber(source.level, 0))),
     labels,
     dependency: asString(source.dependency) || "-",
@@ -124,6 +179,10 @@ function normalizeStoredProjectTemplate(value) {
     id: asString(source.id) || `template-${randomUUID()}`,
     projectName: asString(source.projectName),
     description: asString(source.description),
+    descriptionJson:
+      source.descriptionJson && typeof source.descriptionJson === "object"
+        ? source.descriptionJson
+        : null,
     status: asString(source.status),
     tasks,
     totalTasks: tasks.length,
@@ -236,6 +295,10 @@ async function normalizeCreateProjectTemplatePayload({ db, payload }) {
   return {
     projectName,
     description: asString(source.description),
+    descriptionJson:
+      source.descriptionJson && typeof source.descriptionJson === "object"
+        ? source.descriptionJson
+        : null,
     status,
     tasks,
   };
@@ -250,6 +313,10 @@ function mapProjectTemplateRecord(record) {
     id: asString(record.id),
     projectName: asString(record.projectName),
     description: asString(record.description),
+    descriptionJson:
+      record.descriptionJson && typeof record.descriptionJson === "object"
+        ? record.descriptionJson
+        : null,
     status: normalizeProjectStatus(record.status),
     tasks,
     totalTasks: tasks.length,
@@ -366,6 +433,7 @@ async function createProjectTemplate({ db, actorUserId, payload }) {
       id: `template-${randomUUID()}`,
       projectName: normalizedPayload.projectName,
       description: normalizedPayload.description,
+      descriptionJson: normalizedPayload.descriptionJson ?? undefined,
       status: normalizedPayload.status,
       tasks: normalizedPayload.tasks,
       createdBy,
@@ -431,6 +499,7 @@ async function updateProjectTemplate({ db, templateId, payload }) {
     data: {
       projectName: normalizedPayload.projectName,
       description: normalizedPayload.description,
+      descriptionJson: normalizedPayload.descriptionJson ?? null,
       status: normalizedPayload.status,
       tasks: normalizedPayload.tasks,
     },

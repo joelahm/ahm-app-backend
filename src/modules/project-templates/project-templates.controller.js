@@ -65,10 +65,35 @@ async function updateProjectTemplate(req, res, next) {
   }
 }
 
+async function uploadProjectTemplateAttachment(req, res, next) {
+  try {
+    if (!req.file) {
+      const { AppError } = require('../../lib/errors');
+      throw new AppError(400, 'VALIDATION_ERROR', 'file is required.');
+    }
+
+    const filename = req.file.filename;
+    const url = `/uploads/project-template-attachments/${filename}`;
+
+    res.status(201).json({
+      attachment: {
+        id: filename,
+        filename: req.file.originalname,
+        url,
+        mimeType: req.file.mimetype,
+        sizeBytes: req.file.size,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   listProjectTemplates,
   listProjectTemplateStatusOptions,
   createProjectTemplate,
   updateProjectTemplate,
-  deleteProjectTemplate
+  deleteProjectTemplate,
+  uploadProjectTemplateAttachment,
 };

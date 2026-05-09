@@ -29,6 +29,24 @@ const NOTIFICATION_MODULES = [
         defaults: { inApp: true, email: false, discord: false }
       },
       {
+        key: 'TASK_ATTACHMENT_ADDED',
+        title: 'Attachment added',
+        description: 'When someone attaches a file to a task involving you.',
+        defaults: { inApp: true, email: false, discord: false }
+      },
+      {
+        key: 'TASK_CHECKLIST_ITEM_COMPLETED',
+        title: 'Checklist item completed',
+        description: 'When someone completes a checklist item on a task you own.',
+        defaults: { inApp: true, email: false, discord: false }
+      },
+      {
+        key: 'TASK_SUBTASK_ASSIGNED',
+        title: 'Subtask assigned',
+        description: 'When a subtask is assigned to you.',
+        defaults: { inApp: true, email: true, discord: false }
+      },
+      {
         key: 'TASK_DUE_TOMORROW',
         title: 'Task due tomorrow',
         description: 'Reminder for tasks assigned to you that are due the next day.',

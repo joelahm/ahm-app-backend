@@ -454,6 +454,11 @@ function mapClientProject(project) {
     dueDate: project.dueDate ?? null,
     phase: project.phase,
     progress: normalizeProjectStatus(project.progress),
+    description: project.description ?? null,
+    descriptionJson:
+      project.descriptionJson && typeof project.descriptionJson === "object"
+        ? project.descriptionJson
+        : null,
     createdBy: project.createdBy ? Number(project.createdBy) : null,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
@@ -2545,6 +2550,14 @@ async function createClientProject({
   );
   const startDate = parseOptionalDate(payload.startDate, "startDate");
   const dueDate = parseOptionalDate(payload.dueDate, "dueDate");
+  const descriptionJson =
+    payload.descriptionJson && typeof payload.descriptionJson === "object"
+      ? payload.descriptionJson
+      : null;
+  const description =
+    payload.description === undefined || payload.description === null
+      ? null
+      : String(payload.description);
 
   if (!projectName || !phase || !progressRaw) {
     throw new AppError(
@@ -2581,6 +2594,8 @@ async function createClientProject({
         dueDate,
         phase,
         progress,
+        description,
+        descriptionJson: descriptionJson ?? undefined,
         createdBy: BigInt(actorUserId),
       },
       include: PROJECT_INCLUDE,
@@ -2665,6 +2680,20 @@ async function updateClientProject({
       : parseOptionalUserId(payload.accountManagerId, "accountManagerId");
   const startDate = parseOptionalDate(payload.startDate, "startDate");
   const dueDate = parseOptionalDate(payload.dueDate, "dueDate");
+  const description =
+    payload.description === undefined
+      ? undefined
+      : payload.description === null
+        ? null
+        : String(payload.description);
+  const descriptionJson =
+    payload.descriptionJson === undefined
+      ? undefined
+      : payload.descriptionJson === null
+        ? null
+        : typeof payload.descriptionJson === "object"
+          ? payload.descriptionJson
+          : null;
 
   const nextStartDate =
     startDate === undefined ? existingProject.startDate : startDate;
@@ -2685,6 +2714,8 @@ async function updateClientProject({
     accountManagerId,
     startDate,
     dueDate,
+    description,
+    descriptionJson,
   };
 
   for (const [key, value] of Object.entries(patch)) {
