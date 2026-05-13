@@ -2160,13 +2160,98 @@ async function generateClientGbpPostingContent({
   };
 }
 
-async function updateClientGbpPosting({ db, clientId, postingId, payload }) {
+const GBP_TRACKED_FIELDS = [
+  ["postContent", "Post Content"],
+  ["images", "Images"],
+  ["buttonType", "Button"],
+  ["status", "Status"],
+];
+
+function snapshotGbpPosting(posting) {
+  return {
+    keyword: posting?.keyword ?? null,
+    audience: posting?.audience ?? null,
+    contentType: posting?.contentType ?? null,
+    buttonType: posting?.buttonType ?? null,
+    description: posting?.description ?? null,
+    postContent: posting?.postContent ?? null,
+    images: Array.isArray(posting?.images) ? posting.images : [],
+    liveLink: posting?.liveLink ?? null,
+    status: posting?.status ?? null,
+  };
+}
+
+function stringifyGbpComparable(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
+  }
+
+  return String(value);
+}
+
+async function logGbpAdminActivity({
+  action,
+  actorUserId,
+  clientId,
+  db,
+  fieldName = null,
+  metadata = null,
+  newValue = null,
+  oldValue = null,
+  postingId,
+}) {
+  let actorEmail = null;
+  let actorName = null;
+
+  if (actorUserId) {
+    const user = await db.user.findUnique({
+      where: { id: BigInt(actorUserId) },
+      select: { email: true, firstName: true, lastName: true },
+    });
+
+    if (user) {
+      actorEmail = user.email || null;
+      actorName =
+        [user.firstName, user.lastName]
+          .map((part) => String(part || "").trim())
+          .filter(Boolean)
+          .join(" ") || null;
+    }
+  }
+
+  return db.clientGbpPostingEditActivity.create({
+    data: {
+      action,
+      actorEmail,
+      actorName,
+      actorType: "USER",
+      actorUserId: actorUserId ? BigInt(actorUserId) : null,
+      clientId: BigInt(clientId),
+      fieldName,
+      metadataJson: metadata,
+      newValue,
+      oldValue,
+      postingId: BigInt(postingId),
+    },
+  });
+}
+
+async function updateClientGbpPosting({
+  actorUserId,
+  db,
+  clientId,
+  postingId,
+  payload,
+}) {
   const existingPosting = await db.clientGbpPosting.findFirst({
     where: {
       id: BigInt(postingId),
       clientId: BigInt(clientId),
     },
-    select: { id: true },
   });
   if (!existingPosting) {
     throw new AppError(
@@ -2205,6 +2290,20 @@ async function updateClientGbpPosting({ db, clientId, postingId, payload }) {
       : [];
   }
 
+  // Keep description and postContent in sync — admin saves currently send both
+  // but if only one is provided, mirror it so public/admin reads agree.
+  if (
+    patch.postContent !== undefined &&
+    patch.description === undefined
+  ) {
+    patch.description = patch.postContent;
+  } else if (
+    patch.description !== undefined &&
+    patch.postContent === undefined
+  ) {
+    patch.postContent = patch.description;
+  }
+
   if (!Object.keys(patch).length) {
     throw new AppError(
       400,
@@ -2237,6 +2336,49 @@ async function updateClientGbpPosting({ db, clientId, postingId, payload }) {
       },
     },
   });
+
+  await db.clientGbpPostingVersion.create({
+    data: {
+      clientId: BigInt(clientId),
+      createdByEmail: posting.creator?.email ?? null,
+      createdByName:
+        posting.creator
+          ? [posting.creator.firstName, posting.creator.lastName]
+              .map((part) => String(part || "").trim())
+              .filter(Boolean)
+              .join(" ") || null
+          : null,
+      createdByType: "USER",
+      createdByUserId: actorUserId ? BigInt(actorUserId) : null,
+      postingId: BigInt(postingId),
+      snapshotJson: snapshotGbpPosting(posting),
+      source: "ADMIN_EDIT",
+    },
+  });
+
+  for (const [field, label] of GBP_TRACKED_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(patch, field)) {
+      continue;
+    }
+
+    const oldValue = stringifyGbpComparable(existingPosting[field]);
+    const newValue = stringifyGbpComparable(posting[field]);
+
+    if (oldValue === newValue) {
+      continue;
+    }
+
+    await logGbpAdminActivity({
+      action: "FIELD_UPDATED",
+      actorUserId,
+      clientId,
+      db,
+      fieldName: label,
+      newValue,
+      oldValue,
+      postingId,
+    });
+  }
 
   return mapClientGbpPosting(posting);
 }

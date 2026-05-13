@@ -126,6 +126,20 @@ function readEnv() {
         24,
       ),
     },
+    gbpPostingReview: {
+      linkExpiresDays: readPositiveInteger(
+        process.env.GBP_POSTING_REVIEW_LINK_EXPIRES_DAYS,
+        14,
+      ),
+      otpExpiresMinutes: readPositiveInteger(
+        process.env.GBP_POSTING_REVIEW_OTP_EXPIRES_MINUTES,
+        10,
+      ),
+      sessionExpiresHours: readPositiveInteger(
+        process.env.GBP_POSTING_REVIEW_SESSION_EXPIRES_HOURS,
+        24,
+      ),
+    },
     email: {
       authMode: readSmtpAuthMode(),
       host: process.env.SMTP_HOST || null,

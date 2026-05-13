@@ -13,6 +13,7 @@ const { createPrismaClient } = require('./config/db');
 const { authRouter } = require('./modules/auth/auth.routes');
 const { usersRouter } = require('./modules/users/users.routes');
 const { clientsRouter } = require('./modules/clients/clients.routes');
+const { onPageOptimizationsRouter } = require('./modules/on-page-optimizations/on-page-optimizations.routes');
 const { projectsRouter } = require('./modules/projects/projects.routes');
 const { integrationsRouter } = require('./modules/integrations/integrations.routes');
 const { scansRouter } = require('./modules/scans/scans.routes');
@@ -23,6 +24,7 @@ const { schemaGeneratorSettingsRouter } = require('./modules/schema-generator-se
 const { generatedSchemasRouter } = require('./modules/generated-schemas/generated-schemas.routes');
 const { keywordContentListsRouter } = require('./modules/keyword-content-lists/keyword-content-lists.routes');
 const { websiteContentReviewsRouter } = require('./modules/website-content-reviews/website-content-reviews.routes');
+const { gbpPostingReviewsRouter } = require('./modules/gbp-posting-reviews/gbp-posting-reviews.routes');
 const { notificationsRouter } = require('./modules/notifications/notifications.routes');
 const { urlPreviewRouter } = require('./modules/url-preview/url-preview.routes');
 const { healthRouter } = require('./modules/health/health.routes');
@@ -87,6 +89,7 @@ function createAuthApp() {
   );
 
   app.use('/api/v1/users', usersRouter);
+  app.use('/api/v1/clients/:clientId/on-page-optimizations', onPageOptimizationsRouter);
   app.use('/api/v1/clients', clientsRouter);
   app.use('/api/v1/projects', projectsRouter);
   app.use('/api/v1/integrations', integrationsRouter);
@@ -98,6 +101,7 @@ function createAuthApp() {
   app.use('/api/v1/generated-schemas', generatedSchemasRouter);
   app.use('/api/v1/keyword-content-lists', keywordContentListsRouter);
   app.use('/api/v1/website-content-reviews', websiteContentReviewsRouter);
+  app.use('/api/v1/gbp-posting-reviews', gbpPostingReviewsRouter);
   app.use('/api/v1/notifications', notificationsRouter);
   app.use('/api/v1/url-preview', urlPreviewRouter);
   app.use('/api/v1', healthRouter);

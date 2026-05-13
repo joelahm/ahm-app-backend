@@ -253,6 +253,24 @@ async function sendWebsiteContentReviewOtpEmail({ env, to, fullName, otp }) {
   });
 }
 
+async function sendGbpPostingReviewOtpEmail({ env, to, fullName, otp }) {
+  const tx = createTransporter(env);
+  const recipientName = resolveInviteName(fullName, to);
+  const expiresInMinutes = String(env.gbpPostingReview.otpExpiresMinutes);
+
+  await tx.sendMail({
+    from: env.email.from,
+    to,
+    subject: 'Your AHM GBP posting review code',
+    text: `Hi ${recipientName},\n\nYour GBP posting review code is ${otp}. This code expires in ${expiresInMinutes} minutes.\n\nAHM App Team`,
+    html: buildWebsiteContentReviewOtpHtml({
+      expiresInMinutes,
+      name: recipientName,
+      otp,
+    })
+  });
+}
+
 function buildNotificationHtml({ name, title, body, ctaUrl }) {
   const ctaBlock = ctaUrl
     ? `
@@ -346,6 +364,7 @@ async function sendNotificationEmail({ body, ctaUrl, env, name, title, to }) {
 }
 
 module.exports = {
+  sendGbpPostingReviewOtpEmail,
   sendInviteEmail,
   sendNotificationEmail,
   sendWebsiteContentReviewOtpEmail

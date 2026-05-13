@@ -8,9 +8,9 @@ datasource db {
 }
 
 model Role {
-  code        String    @id @db.VarChar(32)
-  description String    @db.VarChar(255)
-  createdAt   DateTime  @default(now()) @map("created_at")
+  code        String           @id @db.VarChar(32)
+  description String           @db.VarChar(255)
+  createdAt   DateTime         @default(now()) @map("created_at")
   users       User[]
   invitations UserInvitation[]
 
@@ -40,63 +40,65 @@ model UrlPreview {
 }
 
 model User {
-  id                BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
-  email             String         @unique(map: "uq_users_email") @db.VarChar(255)
-  passwordHash      String?        @map("password_hash") @db.VarChar(255)
-  roleCode          String         @map("role_code") @db.VarChar(32)
-  firstName         String?        @map("first_name") @db.VarChar(120)
-  lastName          String?        @map("last_name") @db.VarChar(120)
-  avatarUrl         String?        @map("avatar_url") @db.VarChar(512)
-  title             String?        @db.VarChar(120)
-  department        String?        @db.VarChar(64)
-  phoneNumber       String?        @map("phone_number") @db.VarChar(64)
-  country           String?        @db.VarChar(120)
-  discordUserId     String?        @map("discord_user_id") @db.VarChar(64)
-  timezone          String?        @db.VarChar(64)
-  dateFormat        String?        @map("date_format") @db.VarChar(32)
-  status            String         @default("ACTIVE") @db.VarChar(32)
-  isActive          Boolean        @default(true) @map("is_active")
-  passwordChangedAt DateTime?      @map("password_changed_at")
-  lastLoginAt       DateTime?      @map("last_login_at")
-  createdBy         BigInt?        @map("created_by") @db.UnsignedBigInt
-  createdAt         DateTime       @default(now()) @map("created_at")
-  updatedAt         DateTime       @updatedAt @map("updated_at")
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  email             String    @unique(map: "uq_users_email") @db.VarChar(255)
+  passwordHash      String?   @map("password_hash") @db.VarChar(255)
+  roleCode          String    @map("role_code") @db.VarChar(32)
+  firstName         String?   @map("first_name") @db.VarChar(120)
+  lastName          String?   @map("last_name") @db.VarChar(120)
+  avatarUrl         String?   @map("avatar_url") @db.VarChar(512)
+  title             String?   @db.VarChar(120)
+  department        String?   @db.VarChar(64)
+  phoneNumber       String?   @map("phone_number") @db.VarChar(64)
+  country           String?   @db.VarChar(120)
+  discordUserId     String?   @map("discord_user_id") @db.VarChar(64)
+  timezone          String?   @db.VarChar(64)
+  dateFormat        String?   @map("date_format") @db.VarChar(32)
+  status            String    @default("ACTIVE") @db.VarChar(32)
+  isActive          Boolean   @default(true) @map("is_active")
+  passwordChangedAt DateTime? @map("password_changed_at")
+  lastLoginAt       DateTime? @map("last_login_at")
+  createdBy         BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  role              Role           @relation(fields: [roleCode], references: [code], map: "fk_users_role_code")
-  identities        AuthIdentity[]
-  refreshTokens     RefreshToken[]
-  auditLogs         AuditLog[]     @relation("AuditActor")
-  sentInvitations   UserInvitation[] @relation("InvitedByUser")
-  createdClients    Client[]       @relation("ClientCreatedBy")
-  assignedClients   Client[]       @relation("ClientAssignedTo")
-  clientSuccessManagedProjects ClientProject[] @relation("ClientSuccessManagedProjects")
-  accountManagedProjects       ClientProject[] @relation("AccountManagedProjects")
-  createdClientProjects        ClientProject[] @relation("ClientProjectCreatedBy")
-  createdClientCitations       ClientCitation[] @relation("ClientCitationCreatedBy")
-  createdProjectTemplates      ProjectTemplate[] @relation("ProjectTemplateCreatedBy")
-  assignedProjectTasks         ProjectTask[]   @relation("ProjectTaskAssignedTo")
-  createdProjectTasks          ProjectTask[]   @relation("ProjectTaskCreatedBy")
-  taskComments                 TaskComment[]   @relation("TaskCommentCreatedBy")
-  taskAttachmentsUploaded      TaskAttachment[] @relation("TaskAttachmentUploadedBy")
-  taskChecklistsCreated        TaskChecklist[] @relation("TaskChecklistCreatedBy")
-  taskChecklistItemsCompleted  TaskChecklistItem[] @relation("TaskChecklistItemCompletedBy")
-  taskActivities               TaskActivity[] @relation("TaskActivityActor")
-  projectComments              ProjectComment[] @relation("ProjectCommentCreatedBy")
-  receivedNotifications        Notification[] @relation("NotificationRecipient")
-  actedNotifications           Notification[] @relation("NotificationActor")
-  externalApiLogs              ExternalApiLog[] @relation("ExternalApiLogRequestedBy")
-  manusApiLogs                 ManusApiLog[] @relation("ManusApiLogRequestedBy")
-  createdScans                 Scan[]         @relation("ScanCreatedBy")
-  triggeredScanRuns            ScanRun[]      @relation("ScanRunTriggeredBy")
-  createdGeneratedSchemas     GeneratedSchema[] @relation("GeneratedSchemaCreatedBy")
-  createdAiPrompts            AiPrompt[] @relation("AiPromptCreatedBy")
-  createdCitationDatabaseEntries CitationDatabaseEntry[] @relation("CitationDatabaseEntryCreatedBy")
-  createdKeywordContentLists    KeywordContentList[] @relation("KeywordContentListCreatedBy")
-  createdReviewReplyDrafts      ClientReviewReplyDraft[] @relation("ClientReviewReplyDraftCreatedBy")
-  updatedReviewReplyDrafts      ClientReviewReplyDraft[] @relation("ClientReviewReplyDraftUpdatedBy")
-  createdGbpPostings            ClientGbpPosting[] @relation("ClientGbpPostingCreatedBy")
-  assignedGbpPostings           ClientGbpPosting[] @relation("ClientGbpPostingAssignedTo")
-  createdGbpPostingComments     ClientGbpPostingComment[] @relation("ClientGbpPostingCommentCreatedBy")
+  role                             Role                                   @relation(fields: [roleCode], references: [code], map: "fk_users_role_code")
+  identities                       AuthIdentity[]
+  refreshTokens                    RefreshToken[]
+  auditLogs                        AuditLog[]                             @relation("AuditActor")
+  sentInvitations                  UserInvitation[]                       @relation("InvitedByUser")
+  createdClients                   Client[]                               @relation("ClientCreatedBy")
+  assignedClients                  Client[]                               @relation("ClientAssignedTo")
+  clientSuccessManagedProjects     ClientProject[]                        @relation("ClientSuccessManagedProjects")
+  accountManagedProjects           ClientProject[]                        @relation("AccountManagedProjects")
+  createdClientProjects            ClientProject[]                        @relation("ClientProjectCreatedBy")
+  createdClientCitations           ClientCitation[]                       @relation("ClientCitationCreatedBy")
+  createdProjectTemplates          ProjectTemplate[]                      @relation("ProjectTemplateCreatedBy")
+  assignedProjectTasks             ProjectTask[]                          @relation("ProjectTaskAssignedTo")
+  createdProjectTasks              ProjectTask[]                          @relation("ProjectTaskCreatedBy")
+  taskComments                     TaskComment[]                          @relation("TaskCommentCreatedBy")
+  taskAttachmentsUploaded          TaskAttachment[]                       @relation("TaskAttachmentUploadedBy")
+  taskChecklistsCreated            TaskChecklist[]                        @relation("TaskChecklistCreatedBy")
+  taskChecklistItemsCompleted      TaskChecklistItem[]                    @relation("TaskChecklistItemCompletedBy")
+  taskActivities                   TaskActivity[]                         @relation("TaskActivityActor")
+  projectComments                  ProjectComment[]                       @relation("ProjectCommentCreatedBy")
+  receivedNotifications            Notification[]                         @relation("NotificationRecipient")
+  actedNotifications               Notification[]                         @relation("NotificationActor")
+  externalApiLogs                  ExternalApiLog[]                       @relation("ExternalApiLogRequestedBy")
+  manusApiLogs                     ManusApiLog[]                          @relation("ManusApiLogRequestedBy")
+  createdScans                     Scan[]                                 @relation("ScanCreatedBy")
+  triggeredScanRuns                ScanRun[]                              @relation("ScanRunTriggeredBy")
+  createdGeneratedSchemas          GeneratedSchema[]                      @relation("GeneratedSchemaCreatedBy")
+  createdAiPrompts                 AiPrompt[]                             @relation("AiPromptCreatedBy")
+  createdCitationDatabaseEntries   CitationDatabaseEntry[]                @relation("CitationDatabaseEntryCreatedBy")
+  createdKeywordContentLists       KeywordContentList[]                   @relation("KeywordContentListCreatedBy")
+  createdReviewReplyDrafts         ClientReviewReplyDraft[]               @relation("ClientReviewReplyDraftCreatedBy")
+  updatedReviewReplyDrafts         ClientReviewReplyDraft[]               @relation("ClientReviewReplyDraftUpdatedBy")
+  createdGbpPostings               ClientGbpPosting[]                     @relation("ClientGbpPostingCreatedBy")
+  assignedGbpPostings              ClientGbpPosting[]                     @relation("ClientGbpPostingAssignedTo")
+  createdGbpPostingComments        ClientGbpPostingComment[]              @relation("ClientGbpPostingCommentCreatedBy")
+  createdOnPageOptimizationRuns    ClientOnPageOptimizationRun[]          @relation("ClientOnPageOptimizationRunCreatedBy")
+  onPageOptimizationPageActivities ClientOnPageOptimizationPageActivity[] @relation("ClientOnPageOptimizationPageActivityActor")
 
   @@index([roleCode], map: "idx_users_role_code")
   @@index([status, isActive], map: "idx_users_status_active")
@@ -104,21 +106,21 @@ model User {
 }
 
 model UserInvitation {
-  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  email      String    @db.VarChar(255)
-  roleCode   String    @map("role_code") @db.VarChar(32)
-  locationsJson Json?  @map("locations_json")
-  tokenHash  String    @unique(map: "uq_user_invitation_token_hash") @map("token_hash") @db.Char(64)
-  invitedBy  BigInt?   @map("invited_by") @db.UnsignedBigInt
-  status     String    @default("PENDING") @db.VarChar(32)
-  expiresAt  DateTime  @map("expires_at")
-  sentAt     DateTime? @map("sent_at")
-  acceptedAt DateTime? @map("accepted_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  email         String    @db.VarChar(255)
+  roleCode      String    @map("role_code") @db.VarChar(32)
+  locationsJson Json?     @map("locations_json")
+  tokenHash     String    @unique(map: "uq_user_invitation_token_hash") @map("token_hash") @db.Char(64)
+  invitedBy     BigInt?   @map("invited_by") @db.UnsignedBigInt
+  status        String    @default("PENDING") @db.VarChar(32)
+  expiresAt     DateTime  @map("expires_at")
+  sentAt        DateTime? @map("sent_at")
+  acceptedAt    DateTime? @map("accepted_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  role           Role  @relation(fields: [roleCode], references: [code], map: "fk_user_invitation_role")
-  invitedByUser  User? @relation("InvitedByUser", fields: [invitedBy], references: [id], onDelete: SetNull, map: "fk_user_invitation_invited_by")
+  role          Role  @relation(fields: [roleCode], references: [code], map: "fk_user_invitation_role")
+  invitedByUser User? @relation("InvitedByUser", fields: [invitedBy], references: [id], onDelete: SetNull, map: "fk_user_invitation_invited_by")
 
   @@index([email], map: "idx_user_invitation_email")
   @@index([status], map: "idx_user_invitation_status")
@@ -138,7 +140,7 @@ model AuthIdentity {
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "fk_auth_identity_user")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, map: "fk_auth_identity_user")
 
   @@unique([provider, providerUserId], map: "uq_auth_identity_provider_user")
   @@index([userId], map: "idx_auth_identity_user_id")
@@ -147,24 +149,24 @@ model AuthIdentity {
 }
 
 model RefreshToken {
-  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  userId       BigInt    @map("user_id") @db.UnsignedBigInt
-  sessionId    String    @map("session_id") @db.Char(36)
-  tokenFamily  String    @map("token_family") @db.Char(36)
-  jti          String    @unique(map: "uq_refresh_jti") @db.Char(36)
-  tokenHash    String    @unique(map: "uq_refresh_token_hash") @map("token_hash") @db.Char(64)
-  expiresAt    DateTime  @map("expires_at")
-  isRevoked    Boolean   @default(false) @map("is_revoked")
-  revokedAt    DateTime? @map("revoked_at")
-  revokedReason String?  @map("revoked_reason") @db.VarChar(128)
-  replacedByJti String?  @map("replaced_by_jti") @db.Char(36)
-  createdByIp   String?  @map("created_by_ip") @db.VarChar(64)
-  userAgent     String?  @map("user_agent") @db.VarChar(255)
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  userId        BigInt    @map("user_id") @db.UnsignedBigInt
+  sessionId     String    @map("session_id") @db.Char(36)
+  tokenFamily   String    @map("token_family") @db.Char(36)
+  jti           String    @unique(map: "uq_refresh_jti") @db.Char(36)
+  tokenHash     String    @unique(map: "uq_refresh_token_hash") @map("token_hash") @db.Char(64)
+  expiresAt     DateTime  @map("expires_at")
+  isRevoked     Boolean   @default(false) @map("is_revoked")
+  revokedAt     DateTime? @map("revoked_at")
+  revokedReason String?   @map("revoked_reason") @db.VarChar(128)
+  replacedByJti String?   @map("replaced_by_jti") @db.Char(36)
+  createdByIp   String?   @map("created_by_ip") @db.VarChar(64)
+  userAgent     String?   @map("user_agent") @db.VarChar(255)
   lastUsedAt    DateTime? @map("last_used_at")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade, map: "fk_refresh_user")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade, map: "fk_refresh_user")
 
   @@index([userId], map: "idx_refresh_user_id")
   @@index([sessionId], map: "idx_refresh_session_id")
@@ -174,18 +176,18 @@ model RefreshToken {
 }
 
 model AuditLog {
-  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  actorUserId  BigInt?   @map("actor_user_id") @db.UnsignedBigInt
-  action       String    @db.VarChar(128)
-  resourceType String    @map("resource_type") @db.VarChar(64)
-  resourceId   String?   @map("resource_id") @db.VarChar(64)
-  requestId    String?   @map("request_id") @db.VarChar(64)
-  ipAddress    String?   @map("ip_address") @db.VarChar(64)
-  userAgent    String?   @map("user_agent") @db.VarChar(255)
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  actorUserId  BigInt?  @map("actor_user_id") @db.UnsignedBigInt
+  action       String   @db.VarChar(128)
+  resourceType String   @map("resource_type") @db.VarChar(64)
+  resourceId   String?  @map("resource_id") @db.VarChar(64)
+  requestId    String?  @map("request_id") @db.VarChar(64)
+  ipAddress    String?  @map("ip_address") @db.VarChar(64)
+  userAgent    String?  @map("user_agent") @db.VarChar(255)
   metadata     Json?
-  createdAt    DateTime  @default(now()) @map("created_at")
+  createdAt    DateTime @default(now()) @map("created_at")
 
-  actor        User?     @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull, map: "fk_audit_actor_user")
+  actor User? @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull, map: "fk_audit_actor_user")
 
   @@index([actorUserId], map: "idx_audit_actor_user_id")
   @@index([action, createdAt], map: "idx_audit_action_created_at")
@@ -194,78 +196,80 @@ model AuditLog {
 }
 
 model Client {
-  id                            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  clientName                    String    @map("client_name") @db.VarChar(180)
-  businessName                  String    @map("business_name") @db.VarChar(180)
-  niche                         String    @db.VarChar(255)
-  personalEmail                 String    @map("personal_email") @db.VarChar(255)
-  personalPhone                 String?   @map("personal_phone") @db.VarChar(64)
-  practiceEmail                 String    @map("practice_email") @db.VarChar(255)
-  businessPhone                 String    @map("business_phone") @db.VarChar(64)
-  website                       String?   @db.VarChar(255)
-  country                       String    @db.VarChar(120)
-  typeOfPractice                String?   @map("type_of_practice") @db.VarChar(180)
-  profession                    String?   @db.VarChar(180)
-  practiceStructure             String?   @map("practice_structure") @db.VarChar(180)
-  gmcRegistrationNumber         String?   @map("gmc_registration_number") @db.VarChar(120)
-  topMedicalSpecialties         Json?     @map("top_medical_specialties")
-  otherMedicalSpecialties       Json?     @map("other_medical_specialties")
-  subSpecialties                Json?     @map("sub_specialties")
-  specialInterests              Json?     @map("special_interests")
-  topTreatments                 Json?     @map("top_treatments")
-  practiceIntroduction          String?   @map("practice_introduction") @db.Text
-  uniqueToCompetitors           String?   @map("unique_to_competitors") @db.Text
-  credentials                   String?   @db.Text
-  majorAccomplishments          String?   @map("major_accomplishments") @db.Text
-  highQualityHeadshot           Json?     @map("high_quality_headshot")
-  yourCv                        Json?     @map("your_cv")
-  practiceLocationInteriorPhoto Json?     @map("practice_location_interior_photo")
-  practiceLocationExteriorPhoto Json?     @map("practice_location_exterior_photo")
-  otherImages                   Json?     @map("other_images")
-  buildingName                  String?   @map("building_name") @db.VarChar(255)
-  unitNumber                    String?   @map("unit_number") @db.VarChar(120)
-  streetAddress                 String?   @map("street_address") @db.VarChar(255)
-  region                        String?   @db.VarChar(180)
-  addressLine1                  String?   @map("address_line_1") @db.VarChar(255)
-  addressLine2                  String?   @map("address_line_2") @db.VarChar(255)
-  cityState                     String?   @map("city_state") @db.VarChar(180)
-  postCode                      String?   @map("post_code") @db.VarChar(64)
-  visibleArea                   String?   @map("visible_area") @db.VarChar(255)
-  nearbyAreasServed             String?   @map("nearby_areas_served") @db.VarChar(500)
-  practiceHours                 Json?     @map("practice_hours")
-  gbpLink                       String?   @map("gbp_link") @db.VarChar(255)
-  discordChannel                String?   @map("discord_channel") @db.VarChar(255)
-  facebook                      String?   @db.VarChar(255)
-  instagram                     String?   @db.VarChar(255)
-  linkedin                      String?   @db.VarChar(255)
-  websiteLoginLink              String?   @map("website_login_link") @db.VarChar(255)
-  websiteUsername               String?   @map("website_username") @db.VarChar(255)
-  websitePassword               String?   @map("website_password") @db.VarChar(255)
-  googleAnalytics               String?   @map("google_analytics") @db.VarChar(255)
-  googleSearchConsole           String?   @map("google_search_console") @db.VarChar(255)
-  colorGuide                    Json?     @map("color_guide")
+  id                            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clientName                    String   @map("client_name") @db.VarChar(180)
+  businessName                  String   @map("business_name") @db.VarChar(180)
+  niche                         String   @db.VarChar(255)
+  personalEmail                 String   @map("personal_email") @db.VarChar(255)
+  personalPhone                 String?  @map("personal_phone") @db.VarChar(64)
+  practiceEmail                 String   @map("practice_email") @db.VarChar(255)
+  businessPhone                 String   @map("business_phone") @db.VarChar(64)
+  website                       String?  @db.VarChar(255)
+  onPageOptimizationSitemapUrl  String?  @map("on_page_optimization_sitemap_url") @db.VarChar(1000)
+  country                       String   @db.VarChar(120)
+  typeOfPractice                String?  @map("type_of_practice") @db.VarChar(180)
+  profession                    String?  @db.VarChar(180)
+  practiceStructure             String?  @map("practice_structure") @db.VarChar(180)
+  gmcRegistrationNumber         String?  @map("gmc_registration_number") @db.VarChar(120)
+  topMedicalSpecialties         Json?    @map("top_medical_specialties")
+  otherMedicalSpecialties       Json?    @map("other_medical_specialties")
+  subSpecialties                Json?    @map("sub_specialties")
+  specialInterests              Json?    @map("special_interests")
+  topTreatments                 Json?    @map("top_treatments")
+  practiceIntroduction          String?  @map("practice_introduction") @db.Text
+  uniqueToCompetitors           String?  @map("unique_to_competitors") @db.Text
+  credentials                   String?  @db.Text
+  majorAccomplishments          String?  @map("major_accomplishments") @db.Text
+  highQualityHeadshot           Json?    @map("high_quality_headshot")
+  yourCv                        Json?    @map("your_cv")
+  practiceLocationInteriorPhoto Json?    @map("practice_location_interior_photo")
+  practiceLocationExteriorPhoto Json?    @map("practice_location_exterior_photo")
+  otherImages                   Json?    @map("other_images")
+  buildingName                  String?  @map("building_name") @db.VarChar(255)
+  unitNumber                    String?  @map("unit_number") @db.VarChar(120)
+  streetAddress                 String?  @map("street_address") @db.VarChar(255)
+  region                        String?  @db.VarChar(180)
+  addressLine1                  String?  @map("address_line_1") @db.VarChar(255)
+  addressLine2                  String?  @map("address_line_2") @db.VarChar(255)
+  cityState                     String?  @map("city_state") @db.VarChar(180)
+  postCode                      String?  @map("post_code") @db.VarChar(64)
+  visibleArea                   String?  @map("visible_area") @db.VarChar(255)
+  nearbyAreasServed             String?  @map("nearby_areas_served") @db.VarChar(500)
+  practiceHours                 Json?    @map("practice_hours")
+  gbpLink                       String?  @map("gbp_link") @db.VarChar(255)
+  discordChannel                String?  @map("discord_channel") @db.VarChar(255)
+  facebook                      String?  @db.VarChar(255)
+  instagram                     String?  @db.VarChar(255)
+  linkedin                      String?  @db.VarChar(255)
+  websiteLoginLink              String?  @map("website_login_link") @db.VarChar(255)
+  websiteUsername               String?  @map("website_username") @db.VarChar(255)
+  websitePassword               String?  @map("website_password") @db.VarChar(255)
+  googleAnalytics               String?  @map("google_analytics") @db.VarChar(255)
+  googleSearchConsole           String?  @map("google_search_console") @db.VarChar(255)
+  colorGuide                    Json?    @map("color_guide")
   logo                          Json?
-  treatmentAndServices          Json?     @map("treatment_and_services")
-  conditionsTreated             Json?     @map("conditions_treated")
-  status                        String    @default("ACTIVE") @db.VarChar(32)
-  assignedTo                    BigInt?   @map("assigned_to") @db.UnsignedBigInt
-  createdBy                     BigInt?   @map("created_by") @db.UnsignedBigInt
-  createdAt                     DateTime  @default(now()) @map("created_at")
-  updatedAt                     DateTime  @updatedAt @map("updated_at")
+  treatmentAndServices          Json?    @map("treatment_and_services")
+  conditionsTreated             Json?    @map("conditions_treated")
+  status                        String   @default("ACTIVE") @db.VarChar(32)
+  assignedTo                    BigInt?  @map("assigned_to") @db.UnsignedBigInt
+  createdBy                     BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt                     DateTime @default(now()) @map("created_at")
+  updatedAt                     DateTime @updatedAt @map("updated_at")
 
-  creator                       User?     @relation("ClientCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_clients_created_by")
-  assignedUser                  User?     @relation("ClientAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull, map: "fk_clients_assigned_to")
-  projects                      ClientProject[]
-  citations                     ClientCitation[]
-  externalApiLogs               ExternalApiLog[]
-  manusApiLogs                  ManusApiLog[]
-  keywordContentLists           KeywordContentList[]
-  gbpProfile                    ClientGbpProfile?
-  scans                         Scan[]
-  generatedSchemas              GeneratedSchema[]
-  aiPrompts                     AiPrompt[]
-  reviewReplyDrafts             ClientReviewReplyDraft[]
-  gbpPostings                   ClientGbpPosting[]
+  creator                User?                         @relation("ClientCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_clients_created_by")
+  assignedUser           User?                         @relation("ClientAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull, map: "fk_clients_assigned_to")
+  projects               ClientProject[]
+  citations              ClientCitation[]
+  externalApiLogs        ExternalApiLog[]
+  manusApiLogs           ManusApiLog[]
+  keywordContentLists    KeywordContentList[]
+  gbpProfile             ClientGbpProfile?
+  scans                  Scan[]
+  generatedSchemas       GeneratedSchema[]
+  aiPrompts              AiPrompt[]
+  reviewReplyDrafts      ClientReviewReplyDraft[]
+  gbpPostings            ClientGbpPosting[]
+  onPageOptimizationRuns ClientOnPageOptimizationRun[]
 
   @@index([businessName], map: "idx_clients_business_name")
   @@index([practiceEmail], map: "idx_clients_practice_email")
@@ -275,29 +279,87 @@ model Client {
   @@map("clients")
 }
 
+model ClientOnPageOptimizationRun {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId       BigInt    @map("client_id") @db.UnsignedBigInt
+  websiteUrl     String    @map("website_url") @db.VarChar(500)
+  sitemapUrl     String?   @map("sitemap_url") @db.VarChar(1000)
+  status         String    @default("QUEUED") @db.VarChar(32)
+  healthScore    Int?      @map("health_score")
+  healthGrade    String?   @map("health_grade") @db.VarChar(16)
+  healthStatus   String?   @map("health_status") @db.VarChar(64)
+  pagesAudited   Int?      @map("pages_audited")
+  highIssues     Int?      @map("high_issues")
+  mediumIssues   Int?      @map("medium_issues")
+  lowIssues      Int?      @map("low_issues")
+  markdownPath   String?   @map("markdown_path") @db.VarChar(1000)
+  pdfPath        String?   @map("pdf_path") @db.VarChar(1000)
+  pdfLink        String?   @map("pdf_link") @db.VarChar(1000)
+  driveLink      String?   @map("drive_link") @db.VarChar(1000)
+  summaryJson    Json?     @map("summary_json")
+  resultJson     Json?     @map("result_json")
+  rawOutput      String?   @map("raw_output") @db.LongText
+  failureMessage String?   @map("failure_message") @db.Text
+  startedAt      DateTime? @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  createdBy      BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  client         Client                                 @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_on_page_optimization_runs_client")
+  creator        User?                                  @relation("ClientOnPageOptimizationRunCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_on_page_optimization_runs_created_by")
+  pageActivities ClientOnPageOptimizationPageActivity[]
+
+  @@index([clientId, createdAt], map: "idx_on_page_optimization_runs_client_created")
+  @@index([status], map: "idx_on_page_optimization_runs_status")
+  @@index([createdBy], map: "idx_on_page_optimization_runs_created_by")
+  @@map("client_on_page_optimization_runs")
+}
+
+model ClientOnPageOptimizationPageActivity {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  runId        BigInt   @map("run_id") @db.UnsignedBigInt
+  pageUrl      String   @map("page_url") @db.VarChar(1000)
+  kind         String   @default("COMMENT") @db.VarChar(32)
+  type         String?  @db.VarChar(64)
+  comment      String?  @db.Text
+  bodyJson     Json?    @map("body_json")
+  metadataJson Json?    @map("metadata_json")
+  actorUserId  BigInt?  @map("actor_user_id") @db.UnsignedBigInt
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  run   ClientOnPageOptimizationRun @relation(fields: [runId], references: [id], onDelete: Cascade, map: "fk_on_page_optimization_page_activities_run")
+  actor User?                       @relation("ClientOnPageOptimizationPageActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull, map: "fk_on_page_optimization_page_activities_actor")
+
+  @@index([runId, pageUrl(length: 255), createdAt], map: "idx_on_page_activity_run_page_created")
+  @@index([actorUserId], map: "idx_on_page_activity_actor_user_id")
+  @@map("client_on_page_optimization_page_activities")
+}
+
 model ClientProject {
-  id                     BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  clientId               BigInt   @map("client_id") @db.UnsignedBigInt
-  project                String   @db.VarChar(180)
-  clientSuccessManagerId BigInt?  @map("client_success_manager_id") @db.UnsignedBigInt
-  accountManagerId       BigInt?  @map("account_manager_id") @db.UnsignedBigInt
+  id                     BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId               BigInt    @map("client_id") @db.UnsignedBigInt
+  project                String    @db.VarChar(180)
+  clientSuccessManagerId BigInt?   @map("client_success_manager_id") @db.UnsignedBigInt
+  accountManagerId       BigInt?   @map("account_manager_id") @db.UnsignedBigInt
   startDate              DateTime? @map("start_date")
   dueDate                DateTime? @map("due_date")
-  phase                  String   @db.VarChar(120)
-  progress               String   @db.VarChar(120)
-  description            String?  @db.LongText
-  descriptionJson        Json?    @map("description_json")
-  createdBy              BigInt?  @map("created_by") @db.UnsignedBigInt
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  phase                  String    @db.VarChar(120)
+  progress               String    @db.VarChar(120)
+  description            String?   @db.LongText
+  descriptionJson        Json?     @map("description_json")
+  createdBy              BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
-  client                 Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_projects_client")
-  clientSuccessManager   User?    @relation("ClientSuccessManagedProjects", fields: [clientSuccessManagerId], references: [id], onDelete: SetNull, map: "fk_client_projects_client_success_manager")
-  accountManager         User?    @relation("AccountManagedProjects", fields: [accountManagerId], references: [id], onDelete: SetNull, map: "fk_client_projects_account_manager")
-  creator                User?    @relation("ClientProjectCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_projects_created_by")
-  tasks                  ProjectTask[]
-  comments               ProjectComment[]
-  externalApiLogs        ExternalApiLog[]
+  client               Client           @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_projects_client")
+  clientSuccessManager User?            @relation("ClientSuccessManagedProjects", fields: [clientSuccessManagerId], references: [id], onDelete: SetNull, map: "fk_client_projects_client_success_manager")
+  accountManager       User?            @relation("AccountManagedProjects", fields: [accountManagerId], references: [id], onDelete: SetNull, map: "fk_client_projects_account_manager")
+  creator              User?            @relation("ClientProjectCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_projects_created_by")
+  tasks                ProjectTask[]
+  comments             ProjectComment[]
+  externalApiLogs      ExternalApiLog[]
 
   @@index([clientId], map: "idx_client_projects_client_id")
   @@index([clientSuccessManagerId], map: "idx_client_projects_client_success_manager_id")
@@ -307,17 +369,17 @@ model ClientProject {
 }
 
 model ProjectTemplate {
-  id          String   @id @db.VarChar(64)
-  projectName String   @map("project_name") @db.VarChar(180)
-  description String   @db.LongText
-  descriptionJson Json? @map("description_json")
-  status      String   @db.VarChar(64)
-  tasks       Json
-  createdBy   BigInt?  @map("created_by") @db.UnsignedBigInt
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id              String   @id @db.VarChar(64)
+  projectName     String   @map("project_name") @db.VarChar(180)
+  description     String   @db.LongText
+  descriptionJson Json?    @map("description_json")
+  status          String   @db.VarChar(64)
+  tasks           Json
+  createdBy       BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
-  creator     User?    @relation("ProjectTemplateCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_project_templates_created_by")
+  creator User? @relation("ProjectTemplateCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_project_templates_created_by")
 
   @@index([updatedAt], map: "idx_project_templates_updated_at")
   @@index([createdBy], map: "idx_project_templates_created_by")
@@ -325,23 +387,23 @@ model ProjectTemplate {
 }
 
 model ClientCitation {
-  id            BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  clientId      BigInt   @map("client_id") @db.UnsignedBigInt
-  citationDatabaseEntryId String? @map("citation_database_entry_id") @db.VarChar(64)
-  directoryName String   @map("directory_name") @db.VarChar(180)
-  status        String   @default("NOT_SYNCED") @db.VarChar(64)
-  profileUrl    String?  @map("profile_url") @db.VarChar(500)
-  username      String?  @db.VarChar(255)
-  password      String?  @db.VarChar(255)
-  notes         String?  @db.Text
-  verificationStatus Json? @map("verification_status")
-  createdBy     BigInt?  @map("created_by") @db.UnsignedBigInt
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id                      BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId                BigInt   @map("client_id") @db.UnsignedBigInt
+  citationDatabaseEntryId String?  @map("citation_database_entry_id") @db.VarChar(64)
+  directoryName           String   @map("directory_name") @db.VarChar(180)
+  status                  String   @default("NOT_SYNCED") @db.VarChar(64)
+  profileUrl              String?  @map("profile_url") @db.VarChar(500)
+  username                String?  @db.VarChar(255)
+  password                String?  @db.VarChar(255)
+  notes                   String?  @db.Text
+  verificationStatus      Json?    @map("verification_status")
+  createdBy               BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
-  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_citations_client")
+  client                Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_citations_client")
   citationDatabaseEntry CitationDatabaseEntry? @relation(fields: [citationDatabaseEntryId], references: [id], onDelete: SetNull, map: "fk_client_citations_citation_database_entry")
-  creator       User?    @relation("ClientCitationCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_citations_created_by")
+  creator               User?                  @relation("ClientCitationCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_citations_created_by")
 
   @@unique([clientId, directoryName], map: "uq_client_citations_client_directory")
   @@index([clientId], map: "idx_client_citations_client_id")
@@ -352,38 +414,38 @@ model ClientCitation {
 }
 
 model ProjectTask {
-  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  projectId   BigInt    @map("project_id") @db.UnsignedBigInt
-  parentTaskId BigInt?  @map("parent_task_id") @db.UnsignedBigInt
-  blockedTaskId BigInt? @map("blocked_task_id") @db.UnsignedBigInt
-  task        String    @db.VarChar(180)
-  projectType String?   @map("project_type") @db.VarChar(120)
-  description String?   @db.Text
-  descriptionJson Json?  @map("description_json")
-  status      String    @default("TODO") @db.VarChar(64)
-  priority    String    @default("MEDIUM") @db.VarChar(64)
-  startDate   DateTime? @map("start_date")
-  dueDate     DateTime? @map("due_date")
-  dueDateRuleType String? @map("due_date_rule_type") @db.VarChar(32)
-  dueDateOffsetDays Int @default(0) @map("due_date_offset_days")
-  dueDateManualOverride Boolean @default(false) @map("due_date_manual_override")
-  templateTaskId String? @map("template_task_id") @db.VarChar(128)
-  assignedTo  BigInt?   @map("assigned_to") @db.UnsignedBigInt
-  createdBy   BigInt?   @map("created_by") @db.UnsignedBigInt
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  projectId             BigInt    @map("project_id") @db.UnsignedBigInt
+  parentTaskId          BigInt?   @map("parent_task_id") @db.UnsignedBigInt
+  blockedTaskId         BigInt?   @map("blocked_task_id") @db.UnsignedBigInt
+  task                  String    @db.VarChar(180)
+  projectType           String?   @map("project_type") @db.VarChar(120)
+  description           String?   @db.Text
+  descriptionJson       Json?     @map("description_json")
+  status                String    @default("TODO") @db.VarChar(64)
+  priority              String    @default("MEDIUM") @db.VarChar(64)
+  startDate             DateTime? @map("start_date")
+  dueDate               DateTime? @map("due_date")
+  dueDateRuleType       String?   @map("due_date_rule_type") @db.VarChar(32)
+  dueDateOffsetDays     Int       @default(0) @map("due_date_offset_days")
+  dueDateManualOverride Boolean   @default(false) @map("due_date_manual_override")
+  templateTaskId        String?   @map("template_task_id") @db.VarChar(128)
+  assignedTo            BigInt?   @map("assigned_to") @db.UnsignedBigInt
+  createdBy             BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
-  project     ClientProject @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_project_tasks_project")
-  parentTask  ProjectTask?  @relation("ProjectTaskHierarchy", fields: [parentTaskId], references: [id], onDelete: SetNull, map: "fk_project_tasks_parent_task")
-  subtasks    ProjectTask[] @relation("ProjectTaskHierarchy")
-  blockedTask ProjectTask?  @relation("ProjectTaskBlockedDependency", fields: [blockedTaskId], references: [id], onDelete: SetNull, map: "fk_project_tasks_blocked_task")
-  dependentTasks ProjectTask[] @relation("ProjectTaskBlockedDependency")
-  assignedUser User?        @relation("ProjectTaskAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull, map: "fk_project_tasks_assigned_to")
-  creator      User?        @relation("ProjectTaskCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_project_tasks_created_by")
-  comments     TaskComment[]
-  attachments  TaskAttachment[]
-  checklists   TaskChecklist[]
-  activities   TaskActivity[]
+  project        ClientProject    @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_project_tasks_project")
+  parentTask     ProjectTask?     @relation("ProjectTaskHierarchy", fields: [parentTaskId], references: [id], onDelete: SetNull, map: "fk_project_tasks_parent_task")
+  subtasks       ProjectTask[]    @relation("ProjectTaskHierarchy")
+  blockedTask    ProjectTask?     @relation("ProjectTaskBlockedDependency", fields: [blockedTaskId], references: [id], onDelete: SetNull, map: "fk_project_tasks_blocked_task")
+  dependentTasks ProjectTask[]    @relation("ProjectTaskBlockedDependency")
+  assignedUser   User?            @relation("ProjectTaskAssignedTo", fields: [assignedTo], references: [id], onDelete: SetNull, map: "fk_project_tasks_assigned_to")
+  creator        User?            @relation("ProjectTaskCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_project_tasks_created_by")
+  comments       TaskComment[]
+  attachments    TaskAttachment[]
+  checklists     TaskChecklist[]
+  activities     TaskActivity[]
 
   @@index([projectId], map: "idx_project_tasks_project_id")
   @@index([parentTaskId], map: "idx_project_tasks_parent_task_id")
@@ -421,8 +483,8 @@ model TaskChecklist {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  task    ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade, map: "fk_task_checklists_task")
-  creator User?       @relation("TaskChecklistCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_task_checklists_created_by")
+  task    ProjectTask         @relation(fields: [taskId], references: [id], onDelete: Cascade, map: "fk_task_checklists_task")
+  creator User?               @relation("TaskChecklistCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_task_checklists_created_by")
   items   TaskChecklistItem[]
 
   @@index([taskId], map: "idx_task_checklists_task_id")
@@ -456,8 +518,8 @@ model TaskComment {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  task      ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade, map: "fk_task_comments_task")
-  creator   User        @relation("TaskCommentCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade, map: "fk_task_comments_created_by")
+  task    ProjectTask @relation(fields: [taskId], references: [id], onDelete: Cascade, map: "fk_task_comments_task")
+  creator User        @relation("TaskCommentCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade, map: "fk_task_comments_created_by")
 
   @@index([taskId], map: "idx_task_comments_task_id")
   @@index([createdBy], map: "idx_task_comments_created_by")
@@ -497,9 +559,9 @@ model Notification {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  recipient       User      @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade, map: "fk_notifications_recipient")
-  actor           User?     @relation("NotificationActor", fields: [actorUserId], references: [id], onDelete: SetNull, map: "fk_notifications_actor")
-  deliveries      NotificationDelivery[]
+  recipient  User                   @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade, map: "fk_notifications_recipient")
+  actor      User?                  @relation("NotificationActor", fields: [actorUserId], references: [id], onDelete: SetNull, map: "fk_notifications_actor")
+  deliveries NotificationDelivery[]
 
   @@index([recipientUserId, clearedAt, readAt, createdAt], map: "idx_notifications_recipient_state")
   @@index([type, createdAt], map: "idx_notifications_type_created")
@@ -520,7 +582,7 @@ model NotificationDelivery {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade, map: "fk_notification_deliveries_notification")
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade, map: "fk_notification_deliveries_notification")
 
   @@index([notificationId], map: "idx_notification_deliveries_notification")
   @@index([channel, status, createdAt], map: "idx_notification_deliveries_channel_status")
@@ -535,8 +597,8 @@ model ProjectComment {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  project   ClientProject @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_project_comments_project")
-  creator   User          @relation("ProjectCommentCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade, map: "fk_project_comments_created_by")
+  project ClientProject @relation(fields: [projectId], references: [id], onDelete: Cascade, map: "fk_project_comments_project")
+  creator User          @relation("ProjectCommentCreatedBy", fields: [createdBy], references: [id], onDelete: Cascade, map: "fk_project_comments_created_by")
 
   @@index([projectId], map: "idx_project_comments_project_id")
   @@index([createdBy], map: "idx_project_comments_created_by")
@@ -544,28 +606,28 @@ model ProjectComment {
 }
 
 model ExternalApiLog {
-  id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  provider           String    @db.VarChar(64)
-  operation          String    @db.VarChar(128)
-  cacheNamespace     String    @map("cache_namespace") @db.VarChar(128)
-  requestHash        String    @map("request_hash") @db.Char(64)
-  clientId           BigInt?   @map("client_id") @db.UnsignedBigInt
-  projectId          BigInt?   @map("project_id") @db.UnsignedBigInt
-  requestedBy        BigInt?   @map("requested_by") @db.UnsignedBigInt
-  externalTaskId     String?   @map("external_task_id") @db.VarChar(128)
-  endpoint           String    @db.VarChar(255)
-  requestMethod      String    @map("request_method") @db.VarChar(16)
-  requestPayload     Json      @map("request_payload")
-  responseStatusCode Int?      @map("response_status_code")
-  responsePayload    Json?     @map("response_payload")
-  isSuccess          Boolean   @default(false) @map("is_success")
-  errorMessage       String?   @map("error_message") @db.Text
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  id                 BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  provider           String   @db.VarChar(64)
+  operation          String   @db.VarChar(128)
+  cacheNamespace     String   @map("cache_namespace") @db.VarChar(128)
+  requestHash        String   @map("request_hash") @db.Char(64)
+  clientId           BigInt?  @map("client_id") @db.UnsignedBigInt
+  projectId          BigInt?  @map("project_id") @db.UnsignedBigInt
+  requestedBy        BigInt?  @map("requested_by") @db.UnsignedBigInt
+  externalTaskId     String?  @map("external_task_id") @db.VarChar(128)
+  endpoint           String   @db.VarChar(255)
+  requestMethod      String   @map("request_method") @db.VarChar(16)
+  requestPayload     Json     @map("request_payload")
+  responseStatusCode Int?     @map("response_status_code")
+  responsePayload    Json?    @map("response_payload")
+  isSuccess          Boolean  @default(false) @map("is_success")
+  errorMessage       String?  @map("error_message") @db.Text
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
-  client             Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull, map: "fk_external_api_logs_client")
-  project            ClientProject? @relation(fields: [projectId], references: [id], onDelete: SetNull, map: "fk_external_api_logs_project")
-  requester          User?     @relation("ExternalApiLogRequestedBy", fields: [requestedBy], references: [id], onDelete: SetNull, map: "fk_external_api_logs_requested_by")
+  client    Client?        @relation(fields: [clientId], references: [id], onDelete: SetNull, map: "fk_external_api_logs_client")
+  project   ClientProject? @relation(fields: [projectId], references: [id], onDelete: SetNull, map: "fk_external_api_logs_project")
+  requester User?          @relation("ExternalApiLogRequestedBy", fields: [requestedBy], references: [id], onDelete: SetNull, map: "fk_external_api_logs_requested_by")
 
   @@index([provider, operation], map: "idx_external_api_logs_provider_operation")
   @@index([cacheNamespace, requestHash, createdAt], map: "idx_external_api_logs_cache_lookup")
@@ -577,23 +639,23 @@ model ExternalApiLog {
 }
 
 model ManusApiLog {
-  id                 BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  operation          String    @db.VarChar(128)
-  clientId           BigInt?   @map("client_id") @db.UnsignedBigInt
-  requestedBy        BigInt?   @map("requested_by") @db.UnsignedBigInt
-  endpoint           String    @db.VarChar(255)
-  requestMethod      String    @map("request_method") @db.VarChar(16)
-  requestPayload     Json      @map("request_payload")
-  responseStatusCode Int?      @map("response_status_code")
-  responsePayload    Json?     @map("response_payload")
-  isSuccess          Boolean   @default(false) @map("is_success")
-  externalTaskId     String?   @map("external_task_id") @db.VarChar(128)
-  errorMessage       String?   @map("error_message") @db.Text
-  createdAt          DateTime  @default(now()) @map("created_at")
-  updatedAt          DateTime  @updatedAt @map("updated_at")
+  id                 BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  operation          String   @db.VarChar(128)
+  clientId           BigInt?  @map("client_id") @db.UnsignedBigInt
+  requestedBy        BigInt?  @map("requested_by") @db.UnsignedBigInt
+  endpoint           String   @db.VarChar(255)
+  requestMethod      String   @map("request_method") @db.VarChar(16)
+  requestPayload     Json     @map("request_payload")
+  responseStatusCode Int?     @map("response_status_code")
+  responsePayload    Json?    @map("response_payload")
+  isSuccess          Boolean  @default(false) @map("is_success")
+  externalTaskId     String?  @map("external_task_id") @db.VarChar(128)
+  errorMessage       String?  @map("error_message") @db.Text
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
-  client             Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull, map: "fk_manus_api_logs_client")
-  requester          User?     @relation("ManusApiLogRequestedBy", fields: [requestedBy], references: [id], onDelete: SetNull, map: "fk_manus_api_logs_requested_by")
+  client    Client? @relation(fields: [clientId], references: [id], onDelete: SetNull, map: "fk_manus_api_logs_client")
+  requester User?   @relation("ManusApiLogRequestedBy", fields: [requestedBy], references: [id], onDelete: SetNull, map: "fk_manus_api_logs_requested_by")
 
   @@index([operation], map: "idx_manus_api_logs_operation")
   @@index([clientId], map: "idx_manus_api_logs_client_id")
@@ -603,19 +665,19 @@ model ManusApiLog {
 }
 
 model KeywordContentList {
-  id                      BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  clientId                BigInt    @map("client_id") @db.UnsignedBigInt
-  location                String    @db.VarChar(120)
-  enableContentClustering Boolean   @default(false) @map("enable_content_clustering")
-  topic                   String?   @db.VarChar(255)
-  audience                String?   @db.VarChar(255)
-  keywordsJson            Json      @map("keywords_json")
-  createdBy               BigInt?   @map("created_by") @db.UnsignedBigInt
-  createdAt               DateTime  @default(now()) @map("created_at")
-  updatedAt               DateTime  @updatedAt @map("updated_at")
+  id                      BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId                BigInt   @map("client_id") @db.UnsignedBigInt
+  location                String   @db.VarChar(120)
+  enableContentClustering Boolean  @default(false) @map("enable_content_clustering")
+  topic                   String?  @db.VarChar(255)
+  audience                String?  @db.VarChar(255)
+  keywordsJson            Json     @map("keywords_json")
+  createdBy               BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
-  client                  Client    @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_keyword_content_lists_client")
-  creator                 User?     @relation("KeywordContentListCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_keyword_content_lists_created_by")
+  client  Client @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_keyword_content_lists_client")
+  creator User?  @relation("KeywordContentListCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_keyword_content_lists_created_by")
 
   @@index([clientId], map: "idx_keyword_content_lists_client_id")
   @@index([createdBy], map: "idx_keyword_content_lists_created_by")
@@ -715,17 +777,16 @@ model WebsiteContentReviewComment {
   @@map("website_content_review_comments")
 }
 
-
 model DataForSeoGoogleAdsLocation {
-  id                BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  locationCode      Int      @unique(map: "uq_dataforseo_google_ads_locations_location_code") @map("location_code") @db.UnsignedInt
-  locationName      String   @map("location_name") @db.VarChar(255)
-  locationCodeParent Int?    @map("location_code_parent") @db.UnsignedInt
-  countryIsoCode    String?  @map("country_iso_code") @db.VarChar(8)
-  locationType      String?  @map("location_type") @db.VarChar(64)
-  rawData           Json     @map("raw_data")
-  createdAt         DateTime @default(now()) @map("created_at")
-  updatedAt         DateTime @updatedAt @map("updated_at")
+  id                 BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  locationCode       Int      @unique(map: "uq_dataforseo_google_ads_locations_location_code") @map("location_code") @db.UnsignedInt
+  locationName       String   @map("location_name") @db.VarChar(255)
+  locationCodeParent Int?     @map("location_code_parent") @db.UnsignedInt
+  countryIsoCode     String?  @map("country_iso_code") @db.VarChar(8)
+  locationType       String?  @map("location_type") @db.VarChar(64)
+  rawData            Json     @map("raw_data")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   @@index([countryIsoCode, locationCodeParent], map: "idx_dataforseo_google_ads_locations_country_parent")
   @@index([locationType], map: "idx_dataforseo_google_ads_locations_location_type")
@@ -764,8 +825,8 @@ model ClientGbpProfile {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  client         Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_gbp_profiles_client")
-  scans          Scan[]
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_gbp_profiles_client")
+  scans  Scan[]
 
   @@index([placeId], map: "idx_client_gbp_profiles_place_id")
   @@index([dataCid], map: "idx_client_gbp_profiles_data_cid")
@@ -787,9 +848,9 @@ model ClientReviewReplyDraft {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_review_reply_drafts_client")
-  creator      User?    @relation("ClientReviewReplyDraftCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_review_reply_drafts_created_by")
-  updater      User?    @relation("ClientReviewReplyDraftUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull, map: "fk_client_review_reply_drafts_updated_by")
+  client  Client @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_review_reply_drafts_client")
+  creator User?  @relation("ClientReviewReplyDraftCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_review_reply_drafts_created_by")
+  updater User?  @relation("ClientReviewReplyDraftUpdatedBy", fields: [updatedBy], references: [id], onDelete: SetNull, map: "fk_client_review_reply_drafts_updated_by")
 
   @@unique([clientId, reviewId], map: "uq_client_review_reply_drafts_client_review")
   @@index([clientId], map: "idx_client_review_reply_drafts_client_id")
@@ -800,30 +861,30 @@ model ClientReviewReplyDraft {
 }
 
 model ClientGbpPosting {
-  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  clientId        BigInt    @map("client_id") @db.UnsignedBigInt
-  keyword         String    @db.VarChar(255)
-  audience        String?   @db.VarChar(255)
-  languageCode    String    @default("en") @map("language_code") @db.VarChar(16)
-  language        String    @default("English") @db.VarChar(120)
-  contentType     String    @map("content_type") @db.VarChar(64)
-  buttonType      String?   @map("button_type") @db.VarChar(64)
-  assigneeId      BigInt?   @map("assignee_id") @db.UnsignedBigInt
-  description     String?   @db.Text
-  postContent     String?   @map("post_content") @db.Text
-  images          Json?     @map("images")
-  liveLink        String?   @map("live_link") @db.VarChar(512)
-  status          String    @default("Draft") @db.VarChar(64)
-  scheduledAt     DateTime? @map("scheduled_at")
-  publishedAt     DateTime? @map("published_at")
-  createdBy       BigInt?   @map("created_by") @db.UnsignedBigInt
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId     BigInt    @map("client_id") @db.UnsignedBigInt
+  keyword      String    @db.VarChar(255)
+  audience     String?   @db.VarChar(255)
+  languageCode String    @default("en") @map("language_code") @db.VarChar(16)
+  language     String    @default("English") @db.VarChar(120)
+  contentType  String    @map("content_type") @db.VarChar(64)
+  buttonType   String?   @map("button_type") @db.VarChar(64)
+  assigneeId   BigInt?   @map("assignee_id") @db.UnsignedBigInt
+  description  String?   @db.Text
+  postContent  String?   @map("post_content") @db.Text
+  images       Json?     @map("images")
+  liveLink     String?   @map("live_link") @db.VarChar(512)
+  status       String    @default("Draft") @db.VarChar(64)
+  scheduledAt  DateTime? @map("scheduled_at")
+  publishedAt  DateTime? @map("published_at")
+  createdBy    BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
-  client          Client    @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_gbp_postings_client")
-  creator         User?     @relation("ClientGbpPostingCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_gbp_postings_created_by")
-  assignee        User?     @relation("ClientGbpPostingAssignedTo", fields: [assigneeId], references: [id], onDelete: SetNull, map: "fk_client_gbp_postings_assignee")
-  comments        ClientGbpPostingComment[]
+  client   Client                    @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_gbp_postings_client")
+  creator  User?                     @relation("ClientGbpPostingCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_gbp_postings_created_by")
+  assignee User?                     @relation("ClientGbpPostingAssignedTo", fields: [assigneeId], references: [id], onDelete: SetNull, map: "fk_client_gbp_postings_assignee")
+  comments ClientGbpPostingComment[]
 
   @@index([clientId], map: "idx_client_gbp_postings_client_id")
   @@index([createdBy], map: "idx_client_gbp_postings_created_by")
@@ -834,51 +895,128 @@ model ClientGbpPosting {
 }
 
 model ClientGbpPostingComment {
-  id        BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  postingId BigInt   @map("posting_id") @db.UnsignedBigInt
-  comment   String   @db.Text
-  createdBy BigInt?  @map("created_by") @db.UnsignedBigInt
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  postingId    BigInt   @map("posting_id") @db.UnsignedBigInt
+  reviewLinkId BigInt?  @map("review_link_id") @db.UnsignedBigInt
+  comment      String   @db.Text
+  authorName   String?  @map("author_name") @db.VarChar(255)
+  authorEmail  String?  @map("author_email") @db.VarChar(255)
+  source       String   @default("INTERNAL") @db.VarChar(32)
+  createdBy    BigInt?  @map("created_by") @db.UnsignedBigInt
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  posting   ClientGbpPosting @relation(fields: [postingId], references: [id], onDelete: Cascade, map: "fk_client_gbp_posting_comments_posting")
-  creator   User?            @relation("ClientGbpPostingCommentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_gbp_posting_comments_created_by")
+  posting ClientGbpPosting @relation(fields: [postingId], references: [id], onDelete: Cascade, map: "fk_client_gbp_posting_comments_posting")
+  creator User?            @relation("ClientGbpPostingCommentCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_gbp_posting_comments_created_by")
 
   @@index([postingId], map: "idx_client_gbp_posting_comments_posting_id")
+  @@index([reviewLinkId], map: "idx_client_gbp_posting_comments_review_link_id")
   @@index([createdBy], map: "idx_client_gbp_posting_comments_created_by")
   @@index([createdAt], map: "idx_client_gbp_posting_comments_created_at")
   @@map("client_gbp_posting_comments")
 }
 
-model Scan {
-  id                BigInt           @id @default(autoincrement()) @db.UnsignedBigInt
-  clientId          BigInt?          @map("client_id") @db.UnsignedBigInt
-  gbpProfileId      BigInt?          @map("gbp_profile_id") @db.UnsignedBigInt
-  scanScope         String           @default("CLIENT") @map("scan_scope") @db.VarChar(32)
-  sourcePage        String?          @map("source_page") @db.VarChar(64)
-  quickScanContext  Json?            @map("quick_scan_context")
-  keyword           String           @db.VarChar(255)
-  coverageUnit      String           @map("coverage_unit") @db.VarChar(32)
-  coveragePoints    Json             @map("coverage_points")
-  labels            Json?
-  recurrenceEnabled Boolean          @default(false) @map("recurrence_enabled")
-  frequency         String?          @db.VarChar(32)
-  repeatTime        Int?             @map("repeat_time") @db.UnsignedInt
-  remainingRuns     Int?             @map("remaining_runs") @db.UnsignedInt
-  startAt           DateTime?        @map("start_at")
-  nextRunAt         DateTime?        @map("next_run_at")
-  timezone          String?          @db.VarChar(64)
-  notes             String?          @db.Text
-  estimatedRequests Int              @map("estimated_requests") @db.UnsignedInt
-  status            String           @default("ACTIVE") @db.VarChar(32)
-  createdBy         BigInt?          @map("created_by") @db.UnsignedBigInt
-  createdAt         DateTime         @default(now()) @map("created_at")
-  updatedAt         DateTime         @updatedAt @map("updated_at")
+model ClientGbpPostingReviewLink {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId        BigInt    @map("client_id") @db.UnsignedBigInt
+  postingId       BigInt    @map("posting_id") @db.UnsignedBigInt
+  tokenHash       String    @unique(map: "uq_client_gbp_posting_review_links_token_hash") @map("token_hash") @db.Char(64)
+  tokenCiphertext String    @map("token_ciphertext") @db.Text
+  enabled         Boolean   @default(true)
+  expiresAt       DateTime  @map("expires_at")
+  disabledAt      DateTime? @map("disabled_at")
+  createdBy       BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  client            Client?          @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_scans_client")
-  gbpProfile        ClientGbpProfile? @relation(fields: [gbpProfileId], references: [id], onDelete: Cascade, map: "fk_scans_gbp_profile")
-  creator           User?            @relation("ScanCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_scans_created_by")
-  runs              ScanRun[]
+  @@index([clientId], map: "idx_gbp_posting_review_links_client_id")
+  @@index([postingId], map: "idx_gbp_posting_review_links_posting_id")
+  @@index([expiresAt], map: "idx_gbp_posting_review_links_expires_at")
+  @@map("client_gbp_posting_review_links")
+}
+
+model ClientGbpPostingReviewOtp {
+  id           BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  reviewLinkId BigInt    @map("review_link_id") @db.UnsignedBigInt
+  email        String    @db.VarChar(255)
+  fullName     String    @map("full_name") @db.VarChar(255)
+  otpHash      String    @map("otp_hash") @db.Char(64)
+  expiresAt    DateTime  @map("expires_at")
+  usedAt       DateTime? @map("used_at")
+  attemptCount Int       @default(0) @map("attempt_count") @db.UnsignedInt
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([reviewLinkId, email], map: "idx_gbp_posting_review_otps_link_email")
+  @@index([expiresAt], map: "idx_gbp_posting_review_otps_expires_at")
+  @@map("client_gbp_posting_review_otps")
+}
+
+model ClientGbpPostingVersion {
+  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId        BigInt   @map("client_id") @db.UnsignedBigInt
+  postingId       BigInt   @map("posting_id") @db.UnsignedBigInt
+  source          String   @db.VarChar(64)
+  snapshotJson    Json     @map("snapshot_json")
+  createdByType   String   @map("created_by_type") @db.VarChar(32)
+  createdByUserId BigInt?  @map("created_by_user_id") @db.UnsignedBigInt
+  createdByName   String?  @map("created_by_name") @db.VarChar(255)
+  createdByEmail  String?  @map("created_by_email") @db.VarChar(255)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([clientId], map: "idx_gbp_posting_versions_client_id")
+  @@index([postingId, createdAt], map: "idx_gbp_posting_versions_posting")
+  @@map("client_gbp_posting_versions")
+}
+
+model ClientGbpPostingEditActivity {
+  id           BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId     BigInt   @map("client_id") @db.UnsignedBigInt
+  postingId    BigInt   @map("posting_id") @db.UnsignedBigInt
+  actorType    String   @map("actor_type") @db.VarChar(32)
+  actorUserId  BigInt?  @map("actor_user_id") @db.UnsignedBigInt
+  actorName    String?  @map("actor_name") @db.VarChar(255)
+  actorEmail   String?  @map("actor_email") @db.VarChar(255)
+  action       String   @db.VarChar(64)
+  fieldName    String?  @map("field_name") @db.VarChar(120)
+  oldValue     String?  @map("old_value") @db.MediumText
+  newValue     String?  @map("new_value") @db.MediumText
+  metadataJson Json?    @map("metadata_json")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([clientId], map: "idx_gbp_posting_activity_client_id")
+  @@index([postingId, createdAt], map: "idx_gbp_posting_activity_posting")
+  @@map("client_gbp_posting_edit_activity")
+}
+
+model Scan {
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  clientId          BigInt?   @map("client_id") @db.UnsignedBigInt
+  gbpProfileId      BigInt?   @map("gbp_profile_id") @db.UnsignedBigInt
+  scanScope         String    @default("CLIENT") @map("scan_scope") @db.VarChar(32)
+  sourcePage        String?   @map("source_page") @db.VarChar(64)
+  quickScanContext  Json?     @map("quick_scan_context")
+  keyword           String    @db.VarChar(255)
+  coverageUnit      String    @map("coverage_unit") @db.VarChar(32)
+  coveragePoints    Json      @map("coverage_points")
+  labels            Json?
+  recurrenceEnabled Boolean   @default(false) @map("recurrence_enabled")
+  frequency         String?   @db.VarChar(32)
+  repeatTime        Int?      @map("repeat_time") @db.UnsignedInt
+  remainingRuns     Int?      @map("remaining_runs") @db.UnsignedInt
+  startAt           DateTime? @map("start_at")
+  nextRunAt         DateTime? @map("next_run_at")
+  timezone          String?   @db.VarChar(64)
+  notes             String?   @db.Text
+  estimatedRequests Int       @map("estimated_requests") @db.UnsignedInt
+  status            String    @default("ACTIVE") @db.VarChar(32)
+  createdBy         BigInt?   @map("created_by") @db.UnsignedBigInt
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  client     Client?           @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_scans_client")
+  gbpProfile ClientGbpProfile? @relation(fields: [gbpProfileId], references: [id], onDelete: Cascade, map: "fk_scans_gbp_profile")
+  creator    User?             @relation("ScanCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_scans_created_by")
+  runs       ScanRun[]
 
   @@index([clientId], map: "idx_scans_client_id")
   @@index([gbpProfileId], map: "idx_scans_gbp_profile_id")
@@ -892,22 +1030,22 @@ model Scan {
 }
 
 model ScanRun {
-  id                BigInt      @id @default(autoincrement()) @db.UnsignedBigInt
-  scanId            BigInt      @map("scan_id") @db.UnsignedBigInt
-  status            String      @default("PENDING") @db.VarChar(32)
-  totalRequests     Int         @map("total_requests") @db.UnsignedInt
-  completedRequests Int         @default(0) @map("completed_requests") @db.UnsignedInt
-  failedRequests    Int         @default(0) @map("failed_requests") @db.UnsignedInt
-  triggeredBy       BigInt?     @map("triggered_by") @db.UnsignedBigInt
-  startedAt         DateTime    @default(now()) @map("started_at")
-  finishedAt        DateTime?   @map("finished_at")
+  id                BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  scanId            BigInt    @map("scan_id") @db.UnsignedBigInt
+  status            String    @default("PENDING") @db.VarChar(32)
+  totalRequests     Int       @map("total_requests") @db.UnsignedInt
+  completedRequests Int       @default(0) @map("completed_requests") @db.UnsignedInt
+  failedRequests    Int       @default(0) @map("failed_requests") @db.UnsignedInt
+  triggeredBy       BigInt?   @map("triggered_by") @db.UnsignedBigInt
+  startedAt         DateTime  @default(now()) @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
   summary           Json?
-  createdAt         DateTime    @default(now()) @map("created_at")
-  updatedAt         DateTime    @updatedAt @map("updated_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
-  scan              Scan        @relation(fields: [scanId], references: [id], onDelete: Cascade, map: "fk_scan_runs_scan")
-  triggerUser       User?       @relation("ScanRunTriggeredBy", fields: [triggeredBy], references: [id], onDelete: SetNull, map: "fk_scan_runs_triggered_by")
-  results           ScanResult[]
+  scan        Scan         @relation(fields: [scanId], references: [id], onDelete: Cascade, map: "fk_scan_runs_scan")
+  triggerUser User?        @relation("ScanRunTriggeredBy", fields: [triggeredBy], references: [id], onDelete: SetNull, map: "fk_scan_runs_triggered_by")
+  results     ScanResult[]
 
   @@index([scanId], map: "idx_scan_runs_scan_id")
   @@index([status], map: "idx_scan_runs_status")
@@ -917,25 +1055,25 @@ model ScanRun {
 }
 
 model ScanResult {
-  id               BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  scanRunId        BigInt    @map("scan_run_id") @db.UnsignedBigInt
-  keyword          String    @db.VarChar(255)
-  coordinateLabel  String?   @map("coordinate_label") @db.VarChar(180)
-  latitude         Decimal   @db.Decimal(10, 7)
-  longitude        Decimal   @db.Decimal(10, 7)
-  rankAbsolute     Int?      @map("rank_absolute")
-  rankGroup        Int?      @map("rank_group")
-  matchedTitle     String?   @map("matched_title") @db.VarChar(255)
-  matchedDomain    String?   @map("matched_domain") @db.VarChar(255)
-  matchedPlaceId   String?   @map("matched_place_id") @db.VarChar(255)
-  matchedAddress   String?   @map("matched_address") @db.VarChar(255)
-  matchedPhone     String?   @map("matched_phone") @db.VarChar(64)
-  matchedRating    Decimal?  @map("matched_rating") @db.Decimal(3, 2)
-  matchedItem      Json?     @map("matched_item")
-  apiLogId         BigInt?   @map("api_log_id") @db.UnsignedBigInt
-  createdAt        DateTime  @default(now()) @map("created_at")
+  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  scanRunId       BigInt   @map("scan_run_id") @db.UnsignedBigInt
+  keyword         String   @db.VarChar(255)
+  coordinateLabel String?  @map("coordinate_label") @db.VarChar(180)
+  latitude        Decimal  @db.Decimal(10, 7)
+  longitude       Decimal  @db.Decimal(10, 7)
+  rankAbsolute    Int?     @map("rank_absolute")
+  rankGroup       Int?     @map("rank_group")
+  matchedTitle    String?  @map("matched_title") @db.VarChar(255)
+  matchedDomain   String?  @map("matched_domain") @db.VarChar(255)
+  matchedPlaceId  String?  @map("matched_place_id") @db.VarChar(255)
+  matchedAddress  String?  @map("matched_address") @db.VarChar(255)
+  matchedPhone    String?  @map("matched_phone") @db.VarChar(64)
+  matchedRating   Decimal? @map("matched_rating") @db.Decimal(3, 2)
+  matchedItem     Json?    @map("matched_item")
+  apiLogId        BigInt?  @map("api_log_id") @db.UnsignedBigInt
+  createdAt       DateTime @default(now()) @map("created_at")
 
-  scanRun          ScanRun   @relation(fields: [scanRunId], references: [id], onDelete: Cascade, map: "fk_scan_results_scan_run")
+  scanRun ScanRun @relation(fields: [scanRunId], references: [id], onDelete: Cascade, map: "fk_scan_results_scan_run")
 
   @@index([scanRunId], map: "idx_scan_results_scan_run_id")
   @@index([keyword], map: "idx_scan_results_keyword")
@@ -956,15 +1094,14 @@ model GeneratedSchema {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
-  client        Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_generated_schemas_client")
-  creator       User?    @relation("GeneratedSchemaCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_generated_schemas_created_by")
+  client  Client @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_generated_schemas_client")
+  creator User?  @relation("GeneratedSchemaCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_generated_schemas_created_by")
 
   @@unique([clientId, schemaType], map: "uq_generated_schemas_client_schema_type")
   @@index([updatedAt], map: "idx_generated_schemas_updated_at")
   @@index([createdBy], map: "idx_generated_schemas_created_by")
   @@map("generated_schemas")
 }
-
 
 model AiPrompt {
   id           String   @id @db.VarChar(64)
@@ -982,8 +1119,8 @@ model AiPrompt {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  client       Client   @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_ai_prompts_client")
-  creator      User?    @relation("AiPromptCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_ai_prompts_created_by")
+  client  Client @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_ai_prompts_client")
+  creator User?  @relation("AiPromptCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_ai_prompts_created_by")
 
   @@index([clientId], map: "idx_ai_prompts_client_id")
   @@index([createdBy], map: "idx_ai_prompts_created_by")
@@ -1005,7 +1142,7 @@ model CitationDatabaseEntry {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  creator        User?    @relation("CitationDatabaseEntryCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_citation_database_entries_created_by")
+  creator         User?            @relation("CitationDatabaseEntryCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_citation_database_entries_created_by")
   clientCitations ClientCitation[]
 
   @@index([createdBy], map: "idx_citation_database_entries_created_by")

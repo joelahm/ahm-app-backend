@@ -229,6 +229,7 @@ async function patchClientGbpPosting(req, res, next) {
     const clientId = readClientId(req);
     const postingId = readPostingId(req);
     const posting = await clientsService.updateClientGbpPosting({
+      actorUserId: req.auth?.userId,
       db: req.app.locals.db,
       clientId,
       postingId,
