@@ -13,7 +13,16 @@ const FILE_COLUMN_MAP = {
   colorGuide: "colorGuide",
   logo: "logo",
 };
-const ALLOWED_CLIENT_STATUSES = new Set(["ACTIVE", "INACTIVE", "DELETED"]);
+const ALLOWED_CLIENT_STATUSES = new Set([
+  "ACTIVE",
+  "NEW_CLIENT",
+  "ONBOARDING",
+  "IMPLEMENTATION",
+  "ON_HOLD",
+  "CHURNED",
+  "INACTIVE",
+  "DELETED",
+]);
 const ALLOWED_CITATION_STATUSES = new Set([
   "COMPLETE",
   "PENDING",
@@ -204,7 +213,7 @@ function parseClientStatus(value, fieldName = "status", fallback = undefined) {
     throw new AppError(
       400,
       "VALIDATION_ERROR",
-      `${fieldName} must be ACTIVE, INACTIVE, or DELETED.`,
+      `${fieldName} must be one of ACTIVE, NEW_CLIENT, ONBOARDING, IMPLEMENTATION, ON_HOLD, CHURNED, INACTIVE, or DELETED.`,
     );
   }
 
@@ -212,7 +221,7 @@ function parseClientStatus(value, fieldName = "status", fallback = undefined) {
     throw new AppError(
       400,
       "VALIDATION_ERROR",
-      `${fieldName} must be ACTIVE, INACTIVE, or DELETED.`,
+      `${fieldName} must be one of ACTIVE, NEW_CLIENT, ONBOARDING, IMPLEMENTATION, ON_HOLD, CHURNED, INACTIVE, or DELETED.`,
     );
   }
 

@@ -93,6 +93,42 @@ function isAdminRole(role) {
   return String(role || "").trim().toUpperCase() === "ADMIN";
 }
 
+function normalizeTemplateMatchValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function getTemplateTaskName(task) {
+  return String(task?.taskName || task?.task || task?.title || "").trim();
+}
+
+function buildTaskMatchKey(taskName, parentTaskName) {
+  return [
+    normalizeTemplateMatchValue(taskName),
+    normalizeTemplateMatchValue(parentTaskName),
+  ].join("::");
+}
+
+function groupByValue(items, getKey) {
+  const grouped = new Map();
+
+  for (const item of items) {
+    const key = getKey(item);
+
+    if (!key) {
+      continue;
+    }
+
+    const current = grouped.get(key) || [];
+    current.push(item);
+    grouped.set(key, current);
+  }
+
+  return grouped;
+}
+
 function buildAssignedProjectWhere(actorUserId) {
   return {
     OR: [
@@ -1110,6 +1146,237 @@ async function updateTask({ actorUserId, db, taskId, payload }) {
   }
 
   return mapTask(updated);
+}
+
+async function resyncProjectTaskAssignees({ db, projectId }) {
+  const parsedProjectId = Number(projectId);
+
+  if (!Number.isInteger(parsedProjectId) || parsedProjectId <= 0) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      "projectId must be a positive integer.",
+    );
+  }
+
+  const project = await db.clientProject.findUnique({
+    where: { id: BigInt(parsedProjectId) },
+    select: { id: true, project: true },
+  });
+
+  if (!project) {
+    throw new AppError(404, "NOT_FOUND", "Project not found.");
+  }
+
+  const projectTasks = await db.projectTask.findMany({
+    where: { projectId: BigInt(parsedProjectId) },
+    select: {
+      id: true,
+      task: true,
+      parentTaskId: true,
+      templateTaskId: true,
+      assignedTo: true,
+    },
+    orderBy: { id: "asc" },
+  });
+
+  const projectTaskById = new Map(
+    projectTasks.map((task) => [String(task.id), task]),
+  );
+
+  const projectNameKey = normalizeTemplateMatchValue(project.project);
+  const templates = await db.projectTemplate.findMany({
+    select: { id: true, projectName: true, tasks: true },
+  });
+  const matchingTemplate = templates.find(
+    (template) =>
+      normalizeTemplateMatchValue(template.projectName) === projectNameKey,
+  );
+
+  if (!matchingTemplate) {
+    return {
+      status: "TEMPLATE_NOT_FOUND",
+      projectId: parsedProjectId,
+      projectName: project.project,
+      templateId: null,
+      updated: 0,
+      skipped: projectTasks.length,
+      ambiguous: 0,
+      unmatched: projectTasks.length,
+      details: [],
+    };
+  }
+
+  const templateTasks = Array.isArray(matchingTemplate.tasks)
+    ? matchingTemplate.tasks
+    : [];
+  const templateTaskById = new Map();
+  const templateTasksByName = groupByValue(templateTasks, (task) => {
+    const parentTask = task?.parentTaskId
+      ? templateTasks.find(
+          (candidate) => String(candidate?.id) === String(task.parentTaskId),
+        )
+      : null;
+    const taskName = getTemplateTaskName(task);
+
+    if (!taskName) {
+      return null;
+    }
+
+    return buildTaskMatchKey(taskName, getTemplateTaskName(parentTask));
+  });
+
+  for (const task of templateTasks) {
+    if (task?.id) {
+      templateTaskById.set(String(task.id), task);
+    }
+  }
+
+  const parseUserId = (value) => {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+
+    const parsed = Number(value);
+
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+      return null;
+    }
+
+    return parsed;
+  };
+
+  const userIdsToCheck = new Set();
+  const candidates = [];
+
+  for (const projectTask of projectTasks) {
+    let templateMatch = null;
+    let matchType = "UNMATCHED";
+
+    if (
+      projectTask.templateTaskId &&
+      templateTaskById.has(String(projectTask.templateTaskId))
+    ) {
+      templateMatch = templateTaskById.get(String(projectTask.templateTaskId));
+      matchType = "TEMPLATE_TASK_ID";
+    } else {
+      const parentProjectTask = projectTask.parentTaskId
+        ? projectTaskById.get(String(projectTask.parentTaskId))
+        : null;
+      const matchKey = buildTaskMatchKey(
+        projectTask.task,
+        parentProjectTask?.task,
+      );
+      const matches = templateTasksByName.get(matchKey) || [];
+
+      if (matches.length === 1) {
+        templateMatch = matches[0];
+        matchType = "NAME";
+      } else if (matches.length > 1) {
+        matchType = "AMBIGUOUS";
+      }
+    }
+
+    if (!templateMatch) {
+      candidates.push({
+        projectTaskId: Number(projectTask.id),
+        taskName: projectTask.task,
+        matchType,
+        action: "SKIPPED",
+      });
+      continue;
+    }
+
+    const desiredAssigneeId = parseUserId(templateMatch.assigneeId);
+    const currentAssigneeId =
+      projectTask.assignedTo === null || projectTask.assignedTo === undefined
+        ? null
+        : Number(projectTask.assignedTo);
+
+    if (desiredAssigneeId !== null) {
+      userIdsToCheck.add(desiredAssigneeId);
+    }
+
+    candidates.push({
+      projectTaskId: Number(projectTask.id),
+      taskName: projectTask.task,
+      matchType,
+      currentAssigneeId,
+      desiredAssigneeId,
+      action: "PENDING",
+    });
+  }
+
+  let validUserIds = new Set();
+
+  if (userIdsToCheck.size > 0) {
+    const users = await db.user.findMany({
+      where: {
+        id: { in: Array.from(userIdsToCheck, (id) => BigInt(id)) },
+        isActive: true,
+      },
+      select: { id: true },
+    });
+
+    validUserIds = new Set(users.map((user) => Number(user.id)));
+  }
+
+  let updated = 0;
+  let ambiguous = 0;
+  let unmatched = 0;
+  let skipped = 0;
+
+  for (const candidate of candidates) {
+    if (candidate.action === "SKIPPED") {
+      if (candidate.matchType === "AMBIGUOUS") {
+        ambiguous += 1;
+      } else {
+        unmatched += 1;
+      }
+      continue;
+    }
+
+    if (
+      candidate.desiredAssigneeId !== null &&
+      !validUserIds.has(candidate.desiredAssigneeId)
+    ) {
+      candidate.action = "SKIPPED";
+      candidate.matchType = "INVALID_USER";
+      unmatched += 1;
+      continue;
+    }
+
+    if (candidate.desiredAssigneeId === candidate.currentAssigneeId) {
+      candidate.action = "UNCHANGED";
+      skipped += 1;
+      continue;
+    }
+
+    await db.projectTask.update({
+      where: { id: BigInt(candidate.projectTaskId) },
+      data: {
+        assignedTo:
+          candidate.desiredAssigneeId === null
+            ? null
+            : BigInt(candidate.desiredAssigneeId),
+      },
+    });
+
+    candidate.action = "UPDATED";
+    updated += 1;
+  }
+
+  return {
+    status: "OK",
+    projectId: parsedProjectId,
+    projectName: project.project,
+    templateId: matchingTemplate.id,
+    updated,
+    skipped,
+    ambiguous,
+    unmatched,
+    details: candidates,
+  };
 }
 
 async function listTasksGroupedByProject({ db, clientId, actorUserId, actorRole }) {
@@ -2215,6 +2482,7 @@ module.exports = {
   createTask,
   updateTask,
   listTasksGroupedByProject,
+  resyncProjectTaskAssignees,
   deleteTask,
   createTaskAttachment,
   listTaskAttachments,

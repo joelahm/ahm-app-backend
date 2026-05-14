@@ -42,5 +42,6 @@ router.get('/:projectId/comments', requireAnyPermission(PROJECT_READ_PERMISSIONS
 router.post('/:projectId/comments', requirePermission('edit-location-details'), projectsController.createProjectComment);
 router.delete('/comments/:commentId', requirePermission('edit-location-details'), projectsController.deleteProjectComment);
 router.post('/:id/tasks', requirePermission('edit-location-details'), projectsController.createProjectTask);
+router.post('/:projectId/resync-template-assignees', projectsController.resyncProjectTaskAssignees);
 
 module.exports = { projectsRouter: router };

@@ -1,5 +1,6 @@
 const { AppError } = require('../../lib/errors');
 const projectsService = require('./projects.service');
+const usersService = require('../users/users.service');
 const notificationsService = require('../notifications/notifications.service');
 const { writeAuditLog } = require('../../lib/audit-log');
 
@@ -633,6 +634,51 @@ async function deleteProjectComment(req, res, next) {
   }
 }
 
+async function resyncProjectTaskAssignees(req, res, next) {
+  try {
+    const projectId = readProjectIdParam(req);
+    const isSuperadmin = await usersService.isSuperadminUser({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      userId: req.auth.userId,
+    });
+
+    if (!isSuperadmin) {
+      throw new AppError(
+        403,
+        'FORBIDDEN',
+        'Only superadmins can resync project task assignees.',
+      );
+    }
+
+    const result = await projectsService.resyncProjectTaskAssignees({
+      db: req.app.locals.db,
+      projectId,
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'PROJECT_TASK_ASSIGNEES_RESYNCED',
+      resourceType: 'client_project',
+      resourceId: projectId,
+      metadata: {
+        templateId: result.templateId,
+        updated: result.updated,
+        skipped: result.skipped,
+        ambiguous: result.ambiguous,
+        unmatched: result.unmatched,
+        status: result.status,
+      },
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   listProjects,
   listTasksGroupedByProject,
@@ -656,5 +702,6 @@ module.exports = {
   listTaskActivity,
   createProjectComment,
   listProjectComments,
-  deleteProjectComment
+  deleteProjectComment,
+  resyncProjectTaskAssignees
 };
