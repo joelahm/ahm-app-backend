@@ -211,11 +211,22 @@ function normalizeAuditUrl(value) {
   return parsed.toString();
 }
 
+const DEFAULT_BOT_DIRECTORY = path.resolve(__dirname, '..', '..', '..', 'bot');
+const DEFAULT_REPORTS_DIRECTORY = path.resolve(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'uploads',
+  'qa-reports',
+);
+
 function getBotDirectory() {
-  return (
-    process.env.WEBSITE_QA_BOT_DIR ||
-    path.resolve(process.cwd(), '..', '..', 'Website QA bot')
-  );
+  return process.env.WEBSITE_QA_BOT_DIR || DEFAULT_BOT_DIRECTORY;
+}
+
+function getReportsDirectory() {
+  return process.env.WEBSITE_QA_REPORTS_DIR || DEFAULT_REPORTS_DIRECTORY;
 }
 
 function getBotScriptPath(botDirectory) {
@@ -239,7 +250,7 @@ function assertBotExists() {
 
 function assertBotReportsPath(filePath) {
   const resolvedPath = path.resolve(filePath);
-  const botReportsPath = path.resolve(getBotDirectory(), 'reports');
+  const botReportsPath = path.resolve(getReportsDirectory());
 
   if (!resolvedPath.startsWith(botReportsPath)) {
     throw new AppError(403, 'FORBIDDEN', 'PDF report path is not allowed.');
@@ -378,7 +389,7 @@ async function closeBrowsers() {
     log: (message) => console.error(message),
   });
   const persisted = await persistAudit(audit, {
-    reportsDir: path.join(process.cwd(), 'reports'),
+    reportsDir: process.env.WEBSITE_QA_REPORTS_DIR || path.join(process.cwd(), 'reports'),
     log: (message) => console.error(message),
   });
   const { pdfBuffer, ...safePersisted } = persisted;
@@ -651,6 +662,7 @@ function runBotProcess({ botDirectory, botScriptPath, websiteUrl, clientName }) 
           ...process.env,
           QA_TARGET_URL: websiteUrl,
           QA_CLIENT_NAME: clientName,
+          WEBSITE_QA_REPORTS_DIR: getReportsDirectory(),
           QA_ONDEMAND_MAX_PAGES:
             process.env.QA_ONDEMAND_MAX_PAGES ||
             process.env.QA_MAX_PAGES_PER_SITE ||
@@ -1134,7 +1146,7 @@ async function getRunPdfPath({ db, clientId, runId, actorRole, actorUserId }) {
   });
   const { pdf } = await generatePdf(reportClient, reportAudit);
   const date = new Date().toISOString().slice(0, 10);
-  const reportDir = path.join(botDirectory, 'reports', date);
+  const reportDir = path.join(getReportsDirectory(), date);
   const pdfPath = path.join(reportDir, `${safeReportName(clientName)}.pdf`);
   const nextResultJson = {
     ...(run.resultJson || {}),
