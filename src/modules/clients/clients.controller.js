@@ -20,6 +20,14 @@ function readCitationId(req) {
   return id;
 }
 
+function readAttachmentId(req) {
+  const id = Number(req.params.attachmentId);
+  if (!Number.isFinite(id) || id <= 0) {
+    throw new AppError(400, "VALIDATION_ERROR", "Invalid attachment id.");
+  }
+  return id;
+}
+
 function readProjectId(req) {
   const id = Number(req.params.projectId);
   if (!Number.isFinite(id) || id <= 0) {
@@ -254,6 +262,67 @@ async function deleteClientGbpPosting(req, res, next) {
 
     res.status(204).send();
   } catch (err) {
+    next(err);
+  }
+}
+
+async function uploadWebsiteContentLayout(req, res, next) {
+  try {
+    if (!req.file) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Layout image is required.');
+    }
+
+    readClientId(req);
+
+    const url = `/uploads/website-content-layouts/${path.basename(req.file.path)}`;
+
+    res.status(201).json({
+      image: {
+        mimeType: req.file.mimetype,
+        name: req.file.originalname,
+        size: req.file.size,
+        url,
+      },
+    });
+  } catch (err) {
+    if (req.file?.path) {
+      const uploadedPath = path.resolve(req.file.path);
+      fs.unlink(uploadedPath).catch(() => {});
+    }
+    next(err);
+  }
+}
+
+async function uploadClientGbpPostingImage(req, res, next) {
+  try {
+    if (!req.file) {
+      throw new AppError(400, 'VALIDATION_ERROR', 'Image file is required.');
+    }
+
+    const clientId = readClientId(req);
+    const postingId = readPostingId(req);
+
+    await clientsService.assertClientGbpPostingExists({
+      db: req.app.locals.db,
+      clientId,
+      postingId,
+    });
+
+    const url = `/uploads/gbp-posting-images/${path.basename(req.file.path)}`;
+
+    res.status(201).json({
+      image: {
+        mimeType: req.file.mimetype,
+        name: req.file.originalname,
+        size: req.file.size,
+        url,
+      },
+    });
+  } catch (err) {
+    if (req.file?.path) {
+      const uploadedPath = path.resolve(req.file.path);
+      fs.unlink(uploadedPath).catch(() => {});
+    }
     next(err);
   }
 }
@@ -544,6 +613,58 @@ async function deleteClientCitation(req, res, next) {
   }
 }
 
+async function uploadClientCitationAttachment(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const citationId = readCitationId(req);
+    const attachment = await clientsService.createClientCitationAttachment({
+      db: req.app.locals.db,
+      actorUserId: req.auth.userId,
+      clientId,
+      citationId,
+      file: req.file,
+    });
+
+    res.status(200).json({ attachment });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function listClientCitationAttachments(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const citationId = readCitationId(req);
+    const attachments = await clientsService.listClientCitationAttachments({
+      db: req.app.locals.db,
+      clientId,
+      citationId,
+    });
+
+    res.status(200).json({ attachments, total: attachments.length });
+  } catch (err) {
+    next(err);
+  }
+}
+
+async function deleteClientCitationAttachment(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const citationId = readCitationId(req);
+    const attachmentId = readAttachmentId(req);
+    await clientsService.deleteClientCitationAttachment({
+      db: req.app.locals.db,
+      clientId,
+      citationId,
+      attachmentId,
+    });
+
+    res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listClientProjects(req, res, next) {
   try {
     const clientId = readClientId(req);
@@ -579,6 +700,8 @@ module.exports = {
   generateClientGbpPostingContent,
   patchClientGbpPosting,
   deleteClientGbpPosting,
+  uploadClientGbpPostingImage,
+  uploadWebsiteContentLayout,
   listClientGbpPostingComments,
   createClientGbpPostingComment,
   deleteClientGbpPostingComment,
@@ -589,6 +712,9 @@ module.exports = {
   createClientCitation,
   patchClientCitation,
   deleteClientCitation,
+  uploadClientCitationAttachment,
+  listClientCitationAttachments,
+  deleteClientCitationAttachment,
   createClientProject,
   patchClientProject,
   deleteClientProject,

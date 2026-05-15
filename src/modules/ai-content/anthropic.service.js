@@ -1,6 +1,104 @@
+const fs = require('fs/promises');
+const path = require('path');
+
 const { AppError } = require('../../lib/errors');
 
 const ANTHROPIC_VERSION = '2023-06-01';
+const LAYOUT_SYSTEM_DIRECTIVE = [
+  'A reference page layout image is attached.',
+  'Use it ONLY to infer: (a) what sections to include, (b) approximate length/word count per section, and (c) hierarchy/order.',
+  'DO NOT copy, paraphrase, or transcribe any text visible inside the image.',
+  'All written content must be freshly generated based on the brief and context, NOT lifted from the layout.',
+].join(' ');
+
+const SUPPORTED_LAYOUT_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+]);
+
+function inferMimeTypeFromExtension(extension) {
+  switch (extension.toLowerCase()) {
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.png':
+      return 'image/png';
+    case '.webp':
+      return 'image/webp';
+    case '.gif':
+      return 'image/gif';
+    default:
+      return null;
+  }
+}
+
+async function loadLayoutImageBlock(layoutImageUrl) {
+  const trimmed = String(layoutImageUrl || '').trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const response = await fetch(trimmed);
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const mimeType = response.headers.get('content-type') || inferMimeTypeFromExtension(path.extname(trimmed));
+
+      if (!mimeType || !SUPPORTED_LAYOUT_MIME_TYPES.has(mimeType)) {
+        return null;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      return {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: mimeType,
+          data: buffer.toString('base64'),
+        },
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const normalizedPath = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+  const absolutePath = path.resolve(process.cwd(), 'public', normalizedPath);
+  const publicRoot = path.resolve(process.cwd(), 'public');
+
+  if (!absolutePath.startsWith(publicRoot + path.sep)) {
+    return null;
+  }
+
+  const mimeType = inferMimeTypeFromExtension(path.extname(absolutePath));
+
+  if (!mimeType || !SUPPORTED_LAYOUT_MIME_TYPES.has(mimeType)) {
+    return null;
+  }
+
+  try {
+    const buffer = await fs.readFile(absolutePath);
+
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: mimeType,
+        data: buffer.toString('base64'),
+      },
+    };
+  } catch {
+    return null;
+  }
+}
 
 const DEFAULT_MEDICAL_WEBSITE_SYSTEM_PROMPT = [
   'You generate draft website content for medical and healthcare businesses.',
@@ -130,6 +228,7 @@ async function generateMedicalWebsiteContent({
   env,
   extraInstructions,
   keyword,
+  layoutImageUrl,
   maxOutputTokens,
   model,
   prompt,
@@ -152,16 +251,25 @@ async function generateMedicalWebsiteContent({
   const resolvedMaxOutputTokens = readPositiveInteger(maxOutputTokens, config.maxOutputTokens);
   const resolvedTemperature = readTemperature(temperature, 0.4);
   const endpoint = `${config.baseUrl.replace(/\/+$/, '')}/v1/messages`;
+  const layoutBlock = await loadLayoutImageBlock(layoutImageUrl);
+  const hasLayout = Boolean(layoutBlock);
+  const userContent = hasLayout
+    ? [layoutBlock, { type: 'text', text: resolvedPrompt }]
+    : resolvedPrompt;
+  const baseSystem = optionalString(systemPrompt) || DEFAULT_MEDICAL_WEBSITE_SYSTEM_PROMPT;
+  const resolvedSystem = hasLayout
+    ? `${baseSystem}\n\n${LAYOUT_SYSTEM_DIRECTIVE}`
+    : baseSystem;
   const requestPayload = {
     max_tokens: resolvedMaxOutputTokens,
     messages: [
       {
-        content: resolvedPrompt,
+        content: userContent,
         role: 'user',
       },
     ],
     model: resolvedModel,
-    system: optionalString(systemPrompt) || DEFAULT_MEDICAL_WEBSITE_SYSTEM_PROMPT,
+    system: resolvedSystem,
     temperature: resolvedTemperature,
   };
 

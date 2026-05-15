@@ -21,6 +21,7 @@ router.post(
   keywordContentListsController.uploadFeaturedImage,
 );
 router.patch('/keywords', keywordContentListsController.updateKeywordContentListKeyword);
+router.post('/keywords/generate-content', keywordContentListsController.startWebsiteContentGeneration);
 router.delete('/keywords', keywordContentListsController.deleteKeywordContentListKeyword);
 router.get('/breakdown', keywordContentListsController.getClientContentBreakdown);
 router.put('/breakdown', keywordContentListsController.saveClientContentBreakdown);

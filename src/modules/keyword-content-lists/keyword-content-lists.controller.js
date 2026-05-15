@@ -43,6 +43,21 @@ async function updateKeywordContentListKeyword(req, res, next) {
   }
 }
 
+async function startWebsiteContentGeneration(req, res, next) {
+  try {
+    const data = await keywordContentListsService.startWebsiteContentGeneration({
+      actorUserId: req.auth.userId,
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      payload: req.body || {},
+    });
+
+    res.status(202).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function deleteKeywordContentListKeyword(req, res, next) {
   try {
     const data = await keywordContentListsService.deleteKeywordContentListKeyword({
@@ -115,6 +130,7 @@ module.exports = {
   listKeywordContentLists,
   createKeywordContentList,
   updateKeywordContentListKeyword,
+  startWebsiteContentGeneration,
   deleteKeywordContentListKeyword,
   getClientContentBreakdown,
   saveClientContentBreakdown,

@@ -1106,6 +1106,178 @@ async function notifyProjectStartDateChanged({ actorUserId, db, env, io, nextPro
   });
 }
 
+function buildReviewerLabel(reviewer) {
+  const name = (reviewer?.fullName || reviewer?.name || '').trim();
+  const email = (reviewer?.email || '').trim();
+
+  if (name && email) {
+    return `${name} (${email})`;
+  }
+
+  return name || email || 'A reviewer';
+}
+
+async function listActiveTeamRecipientIds({ db }) {
+  const users = await db.user.findMany({
+    where: { isActive: true, status: 'ACTIVE' },
+    select: { id: true },
+  });
+
+  return users.map((user) => Number(user.id));
+}
+
+async function notifyGbpPostingPublicReviewSaved({
+  action = 'SAVED',
+  db,
+  env,
+  io,
+  postingId,
+  publicUrl,
+  reviewer,
+  status,
+}) {
+  const posting = await db.clientGbpPosting.findUnique({
+    where: { id: BigInt(postingId) },
+    select: {
+      id: true,
+      keyword: true,
+      clientId: true,
+      createdBy: true,
+      assigneeId: true,
+      status: true,
+      client: { select: { businessName: true, clientName: true, assignedTo: true } },
+    },
+  });
+
+  if (!posting) {
+    return [];
+  }
+
+  const recipients = await listActiveTeamRecipientIds({ db });
+
+  if (recipients.length === 0) {
+    return [];
+  }
+
+  const reviewerLabel = buildReviewerLabel(reviewer);
+  const postingTitle = String(posting.keyword || 'GBP posting').trim();
+  const clientName =
+    posting.client?.businessName ||
+    posting.client?.clientName ||
+    `Client ${Number(posting.clientId)}`;
+  const statusLabel = String(status || posting.status || '').trim();
+  const isCommentAction = action === 'COMMENT';
+  const body = isCommentAction
+    ? `${reviewerLabel} added a comment on "${postingTitle}" for ${clientName}.`
+    : `${reviewerLabel} saved changes on "${postingTitle}" for ${clientName}.${
+        statusLabel ? ` Status: ${statusLabel}.` : ''
+      }`;
+
+  return notify({
+    actorUserId: null,
+    body,
+    category: 'OTHER',
+    data: {
+      postingId: Number(posting.id),
+      clientId: Number(posting.clientId),
+      clientName,
+      postingTitle,
+      reviewerEmail: reviewer?.email || null,
+      reviewerName: reviewer?.fullName || reviewer?.name || null,
+      status: statusLabel || null,
+      publicUrl: publicUrl || null,
+      reviewType: 'GBP_POSTING',
+    },
+    db,
+    discordScope: 'personal',
+    entity: { id: posting.id, type: 'gbp_posting' },
+    env,
+    io,
+    recipientUserIds: recipients,
+    severity: 'INFO',
+    title: isCommentAction
+      ? 'Client added a review comment'
+      : 'Client saved review changes',
+    type: isCommentAction ? 'PUBLIC_REVIEW_COMMENT_ADDED' : 'PUBLIC_REVIEW_SAVED',
+  });
+}
+
+async function notifyWebsiteContentPublicReviewSaved({
+  action = 'SAVED',
+  db,
+  env,
+  io,
+  keywordContentListId,
+  keywordId,
+  articleTitle,
+  publicUrl,
+  reviewer,
+  status,
+}) {
+  const list = await db.keywordContentList.findUnique({
+    where: { id: BigInt(keywordContentListId) },
+    select: {
+      id: true,
+      clientId: true,
+      createdBy: true,
+      client: { select: { businessName: true, clientName: true, assignedTo: true } },
+    },
+  });
+
+  if (!list) {
+    return [];
+  }
+
+  const recipients = await listActiveTeamRecipientIds({ db });
+
+  if (recipients.length === 0) {
+    return [];
+  }
+
+  const reviewerLabel = buildReviewerLabel(reviewer);
+  const articleLabel = String(articleTitle || 'Website content').trim();
+  const clientName =
+    list.client?.businessName ||
+    list.client?.clientName ||
+    `Client ${Number(list.clientId)}`;
+  const statusLabel = String(status || '').trim();
+  const isCommentAction = action === 'COMMENT';
+  const body = isCommentAction
+    ? `${reviewerLabel} added a comment on "${articleLabel}" for ${clientName}.`
+    : `${reviewerLabel} saved changes on "${articleLabel}" for ${clientName}.${
+        statusLabel ? ` Status: ${statusLabel}.` : ''
+      }`;
+
+  return notify({
+    actorUserId: null,
+    body,
+    category: 'OTHER',
+    data: {
+      keywordContentListId: Number(list.id),
+      keywordId: keywordId || null,
+      clientId: Number(list.clientId),
+      clientName,
+      articleTitle: articleLabel,
+      reviewerEmail: reviewer?.email || null,
+      reviewerName: reviewer?.fullName || reviewer?.name || null,
+      status: statusLabel || null,
+      publicUrl: publicUrl || null,
+      reviewType: 'WEBSITE_CONTENT',
+    },
+    db,
+    discordScope: 'personal',
+    entity: { id: list.id, type: 'keyword_content_list' },
+    env,
+    io,
+    recipientUserIds: recipients,
+    severity: 'INFO',
+    title: isCommentAction
+      ? 'Client added a review comment'
+      : 'Client saved review changes',
+    type: isCommentAction ? 'PUBLIC_REVIEW_COMMENT_ADDED' : 'PUBLIC_REVIEW_SAVED',
+  });
+}
+
 module.exports = {
   clearNotification,
   getSettings,
@@ -1114,6 +1286,7 @@ module.exports = {
   markAllRead,
   markNotificationRead,
   notify,
+  notifyGbpPostingPublicReviewSaved,
   notifyProjectAssigned,
   notifyProjectStartDateChanged,
   notifyProjectStatusChanged,
@@ -1123,5 +1296,6 @@ module.exports = {
   notifyTaskCommentCreated,
   notifyTaskStatusChanged,
   notifyTaskSubtaskAssigned,
+  notifyWebsiteContentPublicReviewSaved,
   updateSettings
 };

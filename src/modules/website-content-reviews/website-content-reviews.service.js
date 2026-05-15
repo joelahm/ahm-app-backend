@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 
 const { AppError } = require('../../lib/errors');
 const { sendWebsiteContentReviewOtpEmail } = require('../../lib/mailer');
+const notificationsService = require('../notifications/notifications.service');
 
 const REVIEW_SESSION_TYPE = 'website_content_review';
 const EDITABLE_FIELDS = [
@@ -11,6 +12,7 @@ const EDITABLE_FIELDS = [
   ['metaTitle', 'Meta Title'],
   ['metaDescription', 'Meta Description'],
   ['generatedContent', 'Content'],
+  ['status', 'Status'],
   ['featuredImage', 'Featured Image'],
   ['altTitle', 'Alt Title'],
   ['altDescription', 'Alt Description'],
@@ -102,11 +104,17 @@ function toPublicPath(token) {
   return `/website-content-review/${token}`;
 }
 
+const SHARED_REVIEW_SESSION_TYPE = 'client_review';
+const ACCEPTED_REVIEW_SESSION_TYPES = new Set([
+  SHARED_REVIEW_SESSION_TYPE,
+  REVIEW_SESSION_TYPE,
+]);
+
 function signReviewSession({ env, link, reviewer }) {
   return jwt.sign(
     {
-      typ: REVIEW_SESSION_TYPE,
-      linkId: String(link.id),
+      typ: SHARED_REVIEW_SESSION_TYPE,
+      clientId: String(link.clientId),
       email: reviewer.email,
       name: reviewer.fullName,
     },
@@ -120,6 +128,18 @@ function signReviewSession({ env, link, reviewer }) {
   );
 }
 
+function resolveReviewSession({ env, reviewSessionToken }) {
+  if (!reviewSessionToken) {
+    return null;
+  }
+
+  try {
+    return verifyReviewSessionToken(reviewSessionToken, env);
+  } catch {
+    return null;
+  }
+}
+
 function verifyReviewSessionToken(token, env) {
   try {
     const decoded = jwt.verify(token, env.jwt.accessTokenSecret, {
@@ -128,7 +148,7 @@ function verifyReviewSessionToken(token, env) {
       issuer: env.jwt.issuer,
     });
 
-    if (decoded.typ !== REVIEW_SESSION_TYPE) {
+    if (!ACCEPTED_REVIEW_SESSION_TYPES.has(decoded.typ)) {
       throw new Error('Invalid token type.');
     }
 
@@ -203,6 +223,7 @@ function snapshotKeyword(keyword) {
     keyword: keyword?.keyword ?? null,
     metaDescription: keyword?.metaDescription ?? null,
     metaTitle: keyword?.metaTitle ?? null,
+    status: keyword?.status ?? null,
     title: keyword?.title ?? null,
     urlSlug: keyword?.urlSlug ?? null,
   };
@@ -335,7 +356,7 @@ async function getDashboardState({ db, env, query }) {
 
   await getKeywordRecord({ db, keywordId, listId });
 
-  const [link, activities, versions, comments] = await Promise.all([
+  let [link, activities, versions, comments] = await Promise.all([
     db.websiteContentReviewLink.findFirst({
       orderBy: { createdAt: 'desc' },
       where: {
@@ -359,6 +380,14 @@ async function getDashboardState({ db, env, query }) {
       where: { keywordContentListId: listId, keywordId },
     }),
   ]);
+
+  if (link && link.expiresAt instanceof Date && link.expiresAt <= new Date()) {
+    await db.websiteContentReviewLink.update({
+      where: { id: link.id },
+      data: { enabled: false, disabledAt: new Date() },
+    });
+    link = null;
+  }
 
   return {
     activities: activities.map(mapActivity),
@@ -798,19 +827,27 @@ async function findActiveLinkByToken({ db, token }) {
   return link;
 }
 
-async function publicStatus({ db, token }) {
+async function publicStatus({ db, env, reviewSessionToken, token }) {
   const link = await findActiveLinkByToken({ db, token });
   const { keyword, record } = await getKeywordRecord({
     db,
     keywordId: link.keywordId,
     listId: link.keywordContentListId,
   });
+  const session = resolveReviewSession({ env, reviewSessionToken });
+  const isAuthenticated = Boolean(
+    session && String(session.clientId) === String(link.clientId),
+  );
 
   return {
     articleTitle: asString(keyword.title) || asString(keyword.keyword),
     clientName: record.client?.businessName || record.client?.clientName || 'Client',
     expiresAt: link.expiresAt.toISOString(),
-    requiresOtp: true,
+    requiresOtp: !isAuthenticated,
+    authenticated: isAuthenticated,
+    reviewer: isAuthenticated
+      ? { email: session.email, fullName: session.name }
+      : null,
   };
 }
 
@@ -916,8 +953,8 @@ async function requireReviewSession({ db, env, reviewSessionToken, token }) {
   const link = await findActiveLinkByToken({ db, token });
   const session = verifyReviewSessionToken(reviewSessionToken, env);
 
-  if (String(link.id) !== String(session.linkId)) {
-    throw new AppError(403, 'FORBIDDEN', 'Review session does not match this link.');
+  if (String(link.clientId) !== String(session.clientId)) {
+    throw new AppError(403, 'FORBIDDEN', 'Review session does not match this client.');
   }
 
   return {
@@ -998,7 +1035,7 @@ function stringifyComparable(value) {
   return String(value);
 }
 
-async function savePublicContent({ db, env, payload, reviewSessionToken, token }) {
+async function savePublicContent({ db, env, io, payload, publicUrl, reviewSessionToken, token }) {
   const { link, reviewer } = await requireReviewSession({
     db,
     env,
@@ -1067,6 +1104,27 @@ async function savePublicContent({ db, env, payload, reviewSessionToken, token }
     });
   }
 
+  try {
+    await notificationsService.notifyWebsiteContentPublicReviewSaved({
+      action: 'SAVED',
+      articleTitle:
+        asString(updatedKeyword?.title).trim() ||
+        asString(updatedKeyword?.keyword).trim() ||
+        '',
+      db,
+      env,
+      io,
+      keywordContentListId: link.keywordContentListId,
+      keywordId: link.keywordId,
+      publicUrl: publicUrl || null,
+      reviewer,
+      status: updatedKeyword?.status,
+    });
+  } catch (notifyError) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to notify web content review save', notifyError);
+  }
+
   return { article: snapshotKeyword(updatedKeyword), success: true };
 }
 
@@ -1081,7 +1139,7 @@ async function validatePublicReviewSession({ db, env, reviewSessionToken, token 
   return { success: true };
 }
 
-async function addPublicComment({ db, env, payload, reviewSessionToken, token }) {
+async function addPublicComment({ db, env, io, payload, publicUrl, reviewSessionToken, token }) {
   const comment = asString(payload.comment).trim();
 
   if (!comment) {
@@ -1126,6 +1184,33 @@ async function addPublicComment({ db, env, payload, reviewSessionToken, token })
     metadata: { commentId: String(created.id) },
     newValue: comment,
   });
+
+  try {
+    const { keyword: keywordSnapshot } = await getKeywordRecord({
+      db,
+      keywordId: link.keywordId,
+      listId: link.keywordContentListId,
+    });
+
+    await notificationsService.notifyWebsiteContentPublicReviewSaved({
+      action: 'COMMENT',
+      articleTitle:
+        asString(keywordSnapshot?.title).trim() ||
+        asString(keywordSnapshot?.keyword).trim() ||
+        '',
+      db,
+      env,
+      io,
+      keywordContentListId: link.keywordContentListId,
+      keywordId: link.keywordId,
+      publicUrl: publicUrl || null,
+      reviewer,
+      status: keywordSnapshot?.status,
+    });
+  } catch (notifyError) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to notify web content review comment', notifyError);
+  }
 
   return { comment: mapComment(created) };
 }

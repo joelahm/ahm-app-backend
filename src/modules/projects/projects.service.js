@@ -139,6 +139,47 @@ function buildAssignedProjectWhere(actorUserId) {
   };
 }
 
+async function assertTaskVisibleToActor({ db, taskId, actorUserId, actorRole }) {
+  const task = await db.projectTask.findUnique({
+    where: { id: BigInt(taskId) },
+    select: {
+      id: true,
+      assignedTo: true,
+      createdBy: true,
+      project: {
+        select: {
+          accountManagerId: true,
+          clientSuccessManagerId: true,
+        },
+      },
+    },
+  });
+
+  if (!task) {
+    throw new AppError(404, "NOT_FOUND", "Task not found.");
+  }
+
+  if (isAdminRole(actorRole)) {
+    return task;
+  }
+
+  const actorId = Number(actorUserId);
+  const isAssignee = task.assignedTo && Number(task.assignedTo) === actorId;
+  const isCreator = task.createdBy && Number(task.createdBy) === actorId;
+  const isCsm =
+    task.project?.clientSuccessManagerId &&
+    Number(task.project.clientSuccessManagerId) === actorId;
+  const isAm =
+    task.project?.accountManagerId &&
+    Number(task.project.accountManagerId) === actorId;
+
+  if (!isAssignee && !isCreator && !isCsm && !isAm) {
+    throw new AppError(403, "FORBIDDEN", "You cannot view this task.");
+  }
+
+  return task;
+}
+
 function normalizeTaskStatusOptionsValue(value) {
   const source = typeof value === "object" && value !== null ? value : {};
   const rawOptions = Array.isArray(source.statusOptions)
@@ -516,6 +557,12 @@ function mapTask(task) {
           avatar: null,
         }
       : null;
+  const latestCommentRecord = Array.isArray(task.comments)
+    ? task.comments[0]
+    : null;
+  const latestComment = latestCommentRecord
+    ? String(latestCommentRecord.comment ?? "").trim() || null
+    : null;
 
   return {
     id: Number(task.id),
@@ -539,6 +586,7 @@ function mapTask(task) {
     assigneeId: task.assignedTo ? Number(task.assignedTo) : null,
     assignedTo,
     createdBy: task.createdBy ? Number(task.createdBy) : null,
+    latestComment,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
   };
@@ -1412,6 +1460,13 @@ async function listTasksGroupedByProject({ db, clientId, actorUserId, actorRole 
           id: true,
           project: true,
           clientId: true,
+          client: {
+            select: {
+              id: true,
+              clientName: true,
+              businessName: true,
+            },
+          },
         },
       },
       assignedUser: {
@@ -1420,6 +1475,15 @@ async function listTasksGroupedByProject({ db, clientId, actorUserId, actorRole 
           firstName: true,
           lastName: true,
           avatarUrl: true,
+        },
+      },
+      comments: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: {
+          id: true,
+          comment: true,
+          createdAt: true,
         },
       },
       _count: {
@@ -1439,7 +1503,10 @@ async function listTasksGroupedByProject({ db, clientId, actorUserId, actorRole 
         projectId: Number(row.project.id),
         projectName: row.project.project,
         clientId: Number(row.project.clientId),
-        clientName: row.project.client ? row.project.client.client : null,
+        clientName:
+          row.project.client?.clientName ||
+          row.project.client?.businessName ||
+          null,
         tasks: [],
       });
     }
@@ -1889,14 +1956,8 @@ async function createTaskComment({ db, actorUserId, taskId, payload }) {
   return mapComment(created);
 }
 
-async function listTaskComments({ db, taskId }) {
-  const taskExists = await db.projectTask.findUnique({
-    where: { id: BigInt(taskId) },
-    select: { id: true },
-  });
-  if (!taskExists) {
-    throw new AppError(404, "NOT_FOUND", "Task not found.");
-  }
+async function listTaskComments({ db, taskId, actorUserId, actorRole }) {
+  await assertTaskVisibleToActor({ db, taskId, actorUserId, actorRole });
 
   const comments = await db.taskComment.findMany({
     where: { taskId: BigInt(taskId) },
@@ -1955,15 +2016,8 @@ function mapActivityUser(user) {
   };
 }
 
-async function listTaskActivity({ before, db, limit = 50, taskId }) {
-  const taskExists = await db.projectTask.findUnique({
-    where: { id: BigInt(taskId) },
-    select: { id: true },
-  });
-
-  if (!taskExists) {
-    throw new AppError(404, "NOT_FOUND", "Task not found.");
-  }
+async function listTaskActivity({ actorRole, actorUserId, before, db, limit = 50, taskId }) {
+  await assertTaskVisibleToActor({ db, taskId, actorUserId, actorRole });
 
   const parsedLimit = Number(limit);
   const safeLimit =

@@ -9,6 +9,7 @@ const ALLOWED_SCAN_STATUSES = new Set(['ACTIVE', 'PAUSED', 'DELETED']);
 const ALLOWED_SCAN_SCOPES = new Set(['CLIENT', 'QUICK']);
 const LOCAL_RANKINGS_SAVED_KEYWORDS_PREFIX = 'local_rankings_saved_keywords';
 const ALLOWED_SCAN_TIMEZONES = new Set(['Europe/London']);
+const STOPPED_SCAN_RUN_STATUS = 'STOPPED';
 
 function parsePositiveInteger(value, fieldName) {
   const number = Number(value);
@@ -37,6 +38,24 @@ function parseStringArray(value, fieldName) {
   }
 
   return Array.from(new Set(normalized));
+}
+
+function parseOptionalStringArray(value, fieldName) {
+  if (value === undefined || value === null) {
+    return [];
+  }
+
+  if (!Array.isArray(value)) {
+    throw new AppError(400, 'VALIDATION_ERROR', `${fieldName} must be an array.`);
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => String(item || '').trim())
+        .filter(Boolean)
+    )
+  );
 }
 
 function buildSavedLocalRankingKeywordsKey({ clientId, actorUserId }) {
@@ -394,6 +413,15 @@ function mapScanRun(run, includeResults = true) {
   };
 }
 
+async function isScanRunStopped(db, runId) {
+  const run = await db.scanRun.findUnique({
+    where: { id: BigInt(runId) },
+    select: { status: true }
+  });
+
+  return run?.status === STOPPED_SCAN_RUN_STATUS;
+}
+
 function normalizeScanCandidate(item) {
   if (!item || typeof item !== 'object') return null;
   const rawRating = item.rating;
@@ -631,7 +659,7 @@ function buildCreatePayload(payload) {
     : null;
   const keywords = parseKeywordList(payload);
   const coverage = parseCoveragePoints(payload.coverage || payload.coordinates);
-  const labels = payload.labels === undefined ? [] : parseStringArray(payload.labels, 'labels');
+  const labels = parseOptionalStringArray(payload.labels, 'labels');
   const coverageUnit = String(payload.coverageUnit || payload.unit || '').trim().toUpperCase();
   if (coverageUnit !== 'KILOMETERS' && coverageUnit !== 'MILES') {
     throw new AppError(400, 'VALIDATION_ERROR', 'coverageUnit must be KILOMETERS or MILES.');
@@ -996,11 +1024,82 @@ async function startScanRun({ db, actorUserId, scanId }) {
   return mapScanRun(run, false);
 }
 
+async function stopScanRun({ db, io, scanId, runId }) {
+  const run = await db.scanRun.findFirst({
+    where: {
+      id: BigInt(runId),
+      scanId: BigInt(scanId)
+    },
+    include: {
+      scan: true
+    }
+  });
+
+  if (!run) {
+    throw new AppError(404, 'NOT_FOUND', 'Scan run not found.');
+  }
+
+  if (!['PENDING', 'RUNNING'].includes(run.status)) {
+    return { run: mapScanRun(run, false), stopped: false };
+  }
+
+  await db.$transaction([
+    db.scanResult.deleteMany({
+      where: { scanRunId: run.id }
+    }),
+    db.scanRun.update({
+      where: { id: run.id },
+      data: {
+        status: STOPPED_SCAN_RUN_STATUS,
+        completedRequests: 0,
+        failedRequests: 0,
+        finishedAt: new Date(),
+        summary: {
+          stopped: true,
+          successfulChecks: 0,
+          failedChecks: 0
+        }
+      }
+    })
+  ]);
+
+  const stoppedRun = await db.scanRun.findUnique({
+    where: { id: run.id }
+  });
+
+  if (!stoppedRun) {
+    throw new AppError(404, 'NOT_FOUND', 'Scan run not found.');
+  }
+
+  const mappedRun = mapScanRun(stoppedRun, false);
+
+  emitScanEvent(io, Number(run.scanId), Number(run.id), 'scan:run-stopped', {
+    scanId: Number(run.scanId),
+    runId: Number(run.id),
+    run: mappedRun
+  });
+
+  return { run: mappedRun, stopped: true };
+}
+
 async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
   let scan;
   let run;
   let completedRequests = 0;
   let failedRequests = 0;
+
+  const readStoppedRun = async () => {
+    const stoppedRun = await db.scanRun.findUnique({
+      where: { id: BigInt(runId) },
+      include: {
+        results: {
+          orderBy: { id: 'asc' }
+        }
+      }
+    });
+
+    return stoppedRun ? mapScanRun(stoppedRun) : null;
+  };
 
   try {
     scan = await db.scan.findUnique({
@@ -1038,6 +1137,10 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
 
     for (const keyword of keywords) {
       for (const point of coveragePoints) {
+        if (await isScanRunStopped(db, run.id)) {
+          return readStoppedRun();
+        }
+
         try {
           if (point.isOffshore) {
             resultRows.push({
@@ -1052,6 +1155,10 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
               }
             });
             completedRequests += 1;
+
+            if (await isScanRunStopped(db, run.id)) {
+              return readStoppedRun();
+            }
 
             await db.scanRun.update({
               where: { id: run.id },
@@ -1095,6 +1202,10 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
               forceRefresh: true
             }
           });
+
+          if (await isScanRunStopped(db, run.id)) {
+            return readStoppedRun();
+          }
 
           const bestMatch = chooseBestMatch(ranking);
           const selectedCandidate = bestMatch || null;
@@ -1146,6 +1257,10 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
           });
         }
 
+        if (await isScanRunStopped(db, run.id)) {
+          return readStoppedRun();
+        }
+
         await db.scanRun.update({
           where: { id: run.id },
           data: {
@@ -1165,8 +1280,20 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
       }
     }
 
+    if (await isScanRunStopped(db, run.id)) {
+      return readStoppedRun();
+    }
+
     if (resultRows.length) {
       await db.scanResult.createMany({ data: resultRows });
+    }
+
+    if (await isScanRunStopped(db, run.id)) {
+      await db.scanResult.deleteMany({
+        where: { scanRunId: run.id }
+      });
+
+      return readStoppedRun();
     }
 
     const finishedAt = new Date();
@@ -1225,6 +1352,10 @@ async function executeScanRun({ db, env, actorUserId, scanId, runId, io }) {
     return mappedRun;
   } catch (error) {
     if (run && scan) {
+      if (await isScanRunStopped(db, run.id)) {
+        return readStoppedRun();
+      }
+
       const finishedAt = new Date();
       await db.scanRun.update({
         where: { id: run.id },
@@ -1297,6 +1428,40 @@ async function listScanRuns({ db, scanId, page = 1, limit = 20 }) {
       prevPage: hasPrev ? runsPage - 1 : null,
       nextPage: hasNext ? runsPage + 1 : null
     }
+  };
+}
+
+async function listActiveScanRunsForClient({ db, clientId }) {
+  const parsedClientId = parsePositiveInteger(clientId, 'clientId');
+  const runs = await db.scanRun.findMany({
+    where: {
+      status: { in: ['PENDING', 'RUNNING'] },
+      scan: { clientId: BigInt(parsedClientId) },
+    },
+    select: {
+      id: true,
+      scanId: true,
+      status: true,
+      totalRequests: true,
+      completedRequests: true,
+      failedRequests: true,
+      startedAt: true,
+      scan: { select: { keyword: true } },
+    },
+    orderBy: { id: 'desc' },
+  });
+
+  return {
+    runs: runs.map((run) => ({
+      runId: Number(run.id),
+      scanId: Number(run.scanId),
+      status: run.status,
+      totalRequests: run.totalRequests ?? 0,
+      completedRequests: run.completedRequests ?? 0,
+      failedRequests: run.failedRequests ?? 0,
+      keyword: run.scan?.keyword ?? null,
+      startedAt: run.startedAt ? run.startedAt.toISOString() : null,
+    })),
   };
 }
 
@@ -1997,8 +2162,10 @@ async function listClientLocalRankings({ db, clientId, page = 1, limit = 20 }) {
     select: {
       id: true,
       coverageUnit: true,
+      coveragePoints: true,
       createdAt: true,
       frequency: true,
+      keyword: true,
       status: true,
       nextRunAt: true,
       _count: {
@@ -2094,6 +2261,63 @@ async function listClientLocalRankings({ db, clientId, page = 1, limit = 20 }) {
     const previousSummary = previousRun
       ? summarizeKeywordResults(await enrichMappedScanResults(db, previousRun.results || []))
       : new Map();
+
+    if (!latestSummary.size) {
+      const coveragePoints = Array.isArray(scan.coveragePoints) ? scan.coveragePoints : [];
+
+      grouped.set(`${scan.id}:${scan.keyword}`, {
+        scanId: Number(scan.id),
+        runId: Number(latestRun.id),
+        clientId: Number(client.id),
+        clientName: client.businessName,
+        clientAddress: [
+          client.addressLine1,
+          client.cityState,
+          client.postCode,
+          client.country
+        ].filter(Boolean).join(', ') || null,
+        keyword: scan.keyword,
+        dateAdded: scan.createdAt,
+        dateOfScan: latestRun.finishedAt || latestRun.startedAt,
+        coverageUnit: scan.coverageUnit,
+        previousScan: null,
+        latestScan: null,
+        nextSchedule: scan.nextRunAt,
+        totalScans: scan._count.runs,
+        frequency: scan.frequency
+          ? String(scan.frequency || '').toLowerCase()
+          : 'one-time',
+        scanStatus: scan.status,
+        runStatus: latestRun.status,
+        totalCoordinates: coveragePoints.length,
+        foundCoordinates: 0,
+        missingCoordinates: coveragePoints.length,
+        bestRank: null,
+        worstRank: null,
+        averageRank: null,
+        matchedTitle: null,
+        matchedDomain: null,
+        matchedPlaceId: null,
+        matchedPhone: null,
+        matchedRating: null,
+        coordinates: coveragePoints.map((point, index) => ({
+          id: index,
+          coordinateLabel: point.label || null,
+          latitude: point.latitude,
+          longitude: point.longitude,
+          rankAbsolute: null,
+          rankGroup: null,
+          matchedTitle: null,
+          matchedDomain: null,
+          matchedPlaceId: null,
+          matchedPhone: null,
+          matchedRating: null,
+          apiLogId: null
+        }))
+      });
+
+      continue;
+    }
 
     for (const [keyword, summary] of latestSummary.entries()) {
       const previous = previousSummary.get(keyword) || null;
@@ -2239,7 +2463,9 @@ module.exports = {
   deleteScanById,
   deleteScanKeyword,
   startScanRun,
+  stopScanRun,
   executeScanRun,
+  listActiveScanRunsForClient,
   listScanRuns,
   getScanRunById,
   listScanRunKeywordSummary,

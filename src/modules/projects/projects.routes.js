@@ -19,8 +19,11 @@ const PROJECT_READ_PERMISSIONS = [
   'view-performance-dashboard'
 ];
 
-router.get('/list', requireAnyPermission(PROJECT_READ_PERMISSIONS), projectsController.listProjects);
-router.get('/tasks', requireAnyPermission(PROJECT_READ_PERMISSIONS), projectsController.listTasksGroupedByProject);
+// /list and /tasks intentionally accept any authenticated user.
+// The service layer scopes non-admins to their assigned data
+// (assignedTo / CSM / AM), so a member sees only their own rows.
+router.get('/list', projectsController.listProjects);
+router.get('/tasks', projectsController.listTasksGroupedByProject);
 router.post('/tasks', requirePermission('edit-location-details'), projectsController.createProjectTaskFromBody);
 router.patch('/tasks/:taskId', requirePermission('edit-location-details'), projectsController.updateProjectTask);
 router.delete('/tasks/:taskId', requirePermission('remove-client'), projectsController.deleteProjectTask);
@@ -34,7 +37,8 @@ router.delete('/tasks/checklists/:checklistId', projectsController.deleteCheckli
 router.post('/tasks/checklists/:checklistId/items', projectsController.createChecklistItem);
 router.patch('/tasks/checklists/items/:itemId', projectsController.updateChecklistItem);
 router.delete('/tasks/checklists/items/:itemId', projectsController.deleteChecklistItem);
-router.get('/tasks/:taskId/comments', requireAnyPermission(PROJECT_READ_PERMISSIONS), projectsController.listTaskComments);
+// Service enforces task-level visibility (admin OR assignee/creator/CSM/AM).
+router.get('/tasks/:taskId/comments', projectsController.listTaskComments);
 router.post('/tasks/:taskId/comments', requirePermission('edit-location-details'), projectsController.createTaskComment);
 router.delete('/tasks/comments/:commentId', requirePermission('edit-location-details'), projectsController.deleteTaskComment);
 router.get('/tasks/:taskId/activity', projectsController.listTaskActivity);

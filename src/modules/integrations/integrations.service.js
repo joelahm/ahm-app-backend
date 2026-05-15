@@ -1711,7 +1711,7 @@ async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt
   };
 }
 
-async function fetchAnthropicGeneratedText({ db, env, requestedBy, clientId, prompt, maxCharacters = null, model = null, auditContext = null }) {
+async function fetchAnthropicGeneratedText({ db, env, requestedBy, clientId, prompt, maxCharacters = null, model = null, auditContext = null, layoutImageUrl = null }) {
   const operation = 'GENERATE_TEXT';
   const endpoint = `${String(env.integrations.anthropic?.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')}/v1/messages`;
   const resolvedModel = optionalString(model) || env.integrations.anthropic?.model || null;
@@ -1719,6 +1719,7 @@ async function fetchAnthropicGeneratedText({ db, env, requestedBy, clientId, pro
     maxOutputTokens: Number(maxCharacters || env.integrations.anthropic?.maxOutputTokens || 4096),
     model: resolvedModel,
     prompt,
+    layoutImageUrl: optionalString(layoutImageUrl) || null,
   };
 
   try {
@@ -1727,6 +1728,7 @@ async function fetchAnthropicGeneratedText({ db, env, requestedBy, clientId, pro
       maxOutputTokens: requestPayload.maxOutputTokens,
       model: resolvedModel,
       prompt,
+      layoutImageUrl: requestPayload.layoutImageUrl,
     });
 
     const log = await persistManusApiLog({
@@ -1828,6 +1830,7 @@ async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
       prompt,
       maxCharacters,
       auditContext,
+      layoutImageUrl: optionalString(payload.layoutImageUrl) || null,
     });
   }
 

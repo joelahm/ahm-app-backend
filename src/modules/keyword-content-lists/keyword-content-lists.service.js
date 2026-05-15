@@ -1,4 +1,7 @@
 const { AppError } = require('../../lib/errors');
+const anthropicContentService = require('../ai-content/anthropic.service');
+
+const GENERATED_CONTENT_PLACEHOLDER = '__GENERATED_CONTENT__';
 
 function asString(value, fallback = '') {
   return typeof value === 'string' ? value : fallback;
@@ -30,6 +33,101 @@ function parseRequiredString(value, fieldName) {
   }
 
   return normalized;
+}
+
+function parseOptionalString(value) {
+  return asString(value).trim() || null;
+}
+
+function parsePositiveInteger(value, fieldName, fallback) {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new AppError(400, 'VALIDATION_ERROR', `${fieldName} is invalid.`);
+  }
+
+  return parsed;
+}
+
+function cleanGeneratedWebsiteContent(value) {
+  return asString(value)
+    .trim()
+    .replace(/\s*<[^>\n\r]*$/g, '')
+    .replace(/\s*&(?:[a-zA-Z0-9#]*)?$/g, '')
+    .replace(/\n?\s*#{1,6}\s*$/g, '')
+    .trim();
+}
+
+function stripHtmlToPlainText(value) {
+  if (!value) {
+    return '';
+  }
+
+  const cleanedValue = asString(value)
+    .replace(/<[^>\n]{0,80}$/g, '')
+    .replace(/<\/[^>\n]{0,80}$/g, '')
+    .replace(/&lt;[^&\n]{0,80}$/g, '')
+    .replace(/(?:^|\n)\s*[<][a-z0-9/\s-]*$/gi, '')
+    .trim();
+
+  const withLineBreaks = cleanedValue
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/\s*(p|div|h1|h2|h3|h4|h5|h6)\s*>/gi, '\n')
+    .replace(/<\s*li[^>]*>/gi, '\n- ')
+    .replace(/<\/\s*li\s*>/gi, '')
+    .replace(/<[^>]+>/g, ' ');
+
+  const decoded = withLineBreaks
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+
+  return decoded
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n?\s*<\s*[a-z0-9/]*\s*$/i, '')
+    .trim();
+}
+
+function parseGeneratedSeoFields(value) {
+  const trimmed = asString(value).trim();
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const jsonSource = fencedMatch?.[1]?.trim() || trimmed;
+  const objectMatch = jsonSource.match(/\{[\s\S]*\}/);
+  const normalizedSource = objectMatch?.[0] || jsonSource;
+  let parsed;
+
+  try {
+    parsed = JSON.parse(normalizedSource);
+  } catch {
+    throw new AppError(502, 'UPSTREAM_API_ERROR', 'Failed to parse generated SEO metadata.');
+  }
+
+  const metaTitle = asString(parsed.metaTitle).trim();
+  const metaDescription = asString(parsed.metaDescription).trim();
+  const altTitle = asString(parsed.altTitle).trim();
+  const altDescription = asString(parsed.altDescription).trim();
+
+  if (!metaTitle || !metaDescription || !altTitle || !altDescription) {
+    throw new AppError(502, 'UPSTREAM_API_ERROR', 'Generated SEO metadata was incomplete.');
+  }
+
+  return {
+    altDescription,
+    altTitle,
+    metaDescription,
+    metaTitle,
+  };
 }
 
 function normalizeKeywordItem(value) {
@@ -466,6 +564,131 @@ async function updateKeywordContentListKeyword({ actorUserId, db, payload }) {
   };
 }
 
+async function runWebsiteContentGenerationJob({
+  actorUserId,
+  db,
+  env,
+  payload,
+}) {
+  const listId = String(parseUnsignedBigInt(payload.listId, 'listId'));
+  const keywordId = parseRequiredString(payload.keywordId, 'keywordId');
+  const clientId = String(parseUnsignedBigInt(payload.clientId, 'clientId'));
+  const contentPrompt = parseRequiredString(payload.contentPrompt, 'contentPrompt');
+  const seoPromptTemplate = parseRequiredString(payload.seoPromptTemplate, 'seoPromptTemplate');
+  const contentLength = parseRequiredString(payload.contentLength, 'contentLength');
+  const contentType = parseRequiredString(payload.contentType, 'contentType');
+  const title = parseRequiredString(payload.title, 'title');
+  const maxContentTokens = parsePositiveInteger(payload.maxContentTokens, 'maxContentTokens', 4096);
+  const maxSeoTokens = parsePositiveInteger(payload.maxSeoTokens, 'maxSeoTokens', 700);
+  const layoutImageUrl = parseOptionalString(payload.layoutImageUrl);
+
+  await updateKeywordContentListKeyword({
+    actorUserId,
+    db,
+    payload: {
+      keywordId,
+      listId,
+      status: 'Generating',
+    },
+  });
+
+  try {
+    const generatedRaw = await anthropicContentService.generateMedicalWebsiteContent({
+      env,
+      maxOutputTokens: maxContentTokens,
+      prompt: contentPrompt,
+      layoutImageUrl,
+    });
+    const generatedText =
+      typeof generatedRaw === 'string'
+        ? generatedRaw
+        : asString(generatedRaw?.text);
+    const generatedContent = cleanGeneratedWebsiteContent(generatedText);
+
+    if (!generatedContent) {
+      throw new AppError(502, 'UPSTREAM_API_ERROR', 'No content was generated. Please try again.');
+    }
+
+    const plainContent = stripHtmlToPlainText(generatedContent);
+    const seoPrompt = seoPromptTemplate.includes(GENERATED_CONTENT_PLACEHOLDER)
+      ? seoPromptTemplate.replace(GENERATED_CONTENT_PLACEHOLDER, plainContent)
+      : `${seoPromptTemplate}\n\nContent:\n${plainContent}`;
+    const seoRaw = await anthropicContentService.generateMedicalWebsiteContent({
+      env,
+      maxOutputTokens: maxSeoTokens,
+      prompt: seoPrompt,
+    });
+    const seoText =
+      typeof seoRaw === 'string' ? seoRaw : asString(seoRaw?.text);
+    const seoFields = parseGeneratedSeoFields(seoText);
+
+    await updateKeywordContentListKeyword({
+      actorUserId,
+      db,
+      payload: {
+        altDescription: seoFields.altDescription,
+        altTitle: seoFields.altTitle,
+        clientId,
+        contentLength,
+        contentType,
+        generatedContent,
+        keywordId,
+        listId,
+        metaDescription: seoFields.metaDescription,
+        metaTitle: seoFields.metaTitle,
+        status: 'Completed',
+        title,
+      },
+    });
+  } catch (error) {
+    await updateKeywordContentListKeyword({
+      actorUserId,
+      db,
+      payload: {
+        keywordId,
+        listId,
+        status: 'Failed',
+      },
+    }).catch(() => {});
+
+    throw error;
+  }
+}
+
+async function startWebsiteContentGeneration({ actorUserId, db, env, payload }) {
+  const listId = String(parseUnsignedBigInt(payload.listId, 'listId'));
+  const keywordId = parseRequiredString(payload.keywordId, 'keywordId');
+
+  await updateKeywordContentListKeyword({
+    actorUserId,
+    db,
+    payload: {
+      keywordId,
+      listId,
+      status: 'Generating',
+    },
+  });
+
+  setImmediate(() => {
+    runWebsiteContentGenerationJob({
+      actorUserId,
+      db,
+      env,
+      payload,
+    }).catch((error) => {
+      // eslint-disable-next-line no-console
+      console.error('Website content generation failed:', error);
+    });
+  });
+
+  return {
+    keywordId,
+    listId,
+    queued: true,
+    status: 'Generating',
+  };
+}
+
 async function deleteKeywordContentListKeyword({ actorUserId, db, query }) {
   const listId = parseUnsignedBigInt(query.listId, 'listId');
   const keywordId = parseRequiredString(query.keywordId, 'keywordId');
@@ -597,6 +820,7 @@ module.exports = {
   listKeywordContentLists,
   createKeywordContentList,
   updateKeywordContentListKeyword,
+  startWebsiteContentGeneration,
   deleteKeywordContentListKeyword,
   getClientContentBreakdown,
   saveClientContentBreakdown,

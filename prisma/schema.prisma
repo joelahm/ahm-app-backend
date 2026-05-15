@@ -78,6 +78,7 @@ model User {
   createdProjectTasks              ProjectTask[]                          @relation("ProjectTaskCreatedBy")
   taskComments                     TaskComment[]                          @relation("TaskCommentCreatedBy")
   taskAttachmentsUploaded          TaskAttachment[]                       @relation("TaskAttachmentUploadedBy")
+  clientCitationAttachmentsUploaded ClientCitationAttachment[]             @relation("ClientCitationAttachmentUploadedBy")
   taskChecklistsCreated            TaskChecklist[]                        @relation("TaskChecklistCreatedBy")
   taskChecklistItemsCompleted      TaskChecklistItem[]                    @relation("TaskChecklistItemCompletedBy")
   taskActivities                   TaskActivity[]                         @relation("TaskActivityActor")
@@ -404,6 +405,7 @@ model ClientCitation {
   client                Client                 @relation(fields: [clientId], references: [id], onDelete: Cascade, map: "fk_client_citations_client")
   citationDatabaseEntry CitationDatabaseEntry? @relation(fields: [citationDatabaseEntryId], references: [id], onDelete: SetNull, map: "fk_client_citations_citation_database_entry")
   creator               User?                  @relation("ClientCitationCreatedBy", fields: [createdBy], references: [id], onDelete: SetNull, map: "fk_client_citations_created_by")
+  attachments           ClientCitationAttachment[]
 
   @@unique([clientId, directoryName], map: "uq_client_citations_client_directory")
   @@index([clientId], map: "idx_client_citations_client_id")
@@ -411,6 +413,25 @@ model ClientCitation {
   @@index([status], map: "idx_client_citations_status")
   @@index([createdBy], map: "idx_client_citations_created_by")
   @@map("client_citations")
+}
+
+model ClientCitationAttachment {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  citationId  BigInt   @map("citation_id") @db.UnsignedBigInt
+  filename    String   @db.VarChar(255)
+  mimeType    String   @map("mime_type") @db.VarChar(120)
+  sizeBytes   Int      @map("size_bytes")
+  storagePath String   @map("storage_path") @db.VarChar(500)
+  uploadedBy  BigInt?  @map("uploaded_by") @db.UnsignedBigInt
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  citation ClientCitation @relation(fields: [citationId], references: [id], onDelete: Cascade, map: "fk_client_citation_attachments_citation")
+  uploader User?          @relation("ClientCitationAttachmentUploadedBy", fields: [uploadedBy], references: [id], onDelete: SetNull, map: "fk_client_citation_attachments_uploaded_by")
+
+  @@index([citationId], map: "idx_client_citation_attachments_citation_id")
+  @@index([uploadedBy], map: "idx_client_citation_attachments_uploaded_by")
+  @@map("client_citation_attachments")
 }
 
 model ProjectTask {

@@ -1,4 +1,6 @@
 const { AppError } = require("../../lib/errors");
+const fs = require("fs/promises");
+const path = require("path");
 const integrationsService = require("../integrations/integrations.service");
 const notificationsService = require("../notifications/notifications.service");
 
@@ -26,6 +28,7 @@ const ALLOWED_CLIENT_STATUSES = new Set([
 const ALLOWED_CITATION_STATUSES = new Set([
   "COMPLETE",
   "PENDING",
+  "SUBMITTED",
   "INCOMPLETE",
   "MISSING",
   "ERROR",
@@ -188,7 +191,24 @@ function buildAssignedProjectWhere(actorUserId) {
 }
 
 function buildVisibleClientWhere(actorUserId) {
-  return { assignedTo: BigInt(actorUserId) };
+  const userIdBigInt = BigInt(actorUserId);
+
+  return {
+    OR: [
+      { assignedTo: userIdBigInt },
+      {
+        projects: {
+          some: {
+            OR: [
+              { clientSuccessManagerId: userIdBigInt },
+              { accountManagerId: userIdBigInt },
+              { tasks: { some: { assignedTo: userIdBigInt } } },
+            ],
+          },
+        },
+      },
+    ],
+  };
 }
 
 function toJsonArray(value) {
@@ -338,6 +358,8 @@ function formatCitationStatus(status) {
     case "NOT_SYNCED":
     case "IN_REVIEW":
       return "Pending";
+    case "SUBMITTED":
+      return "Submitted";
     case "INCOMPLETE":
     case "REJECTED":
       return "Incomplete";
@@ -374,13 +396,6 @@ function formatCitationVerificationStatusMap(value) {
   }, {});
 }
 
-function normalizeCitationDirectoryName(value) {
-  return String(value || "")
-    .trim()
-    .replace(/\s+/g, " ")
-    .toLowerCase();
-}
-
 function mapClientCitation(citation) {
   return {
     id: Number(citation.id),
@@ -404,46 +419,40 @@ function mapClientCitation(citation) {
   };
 }
 
-async function backfillClientCitationTemplateLinks({ db, clientId }) {
-  const [templates, citations] = await Promise.all([
-    db.citationDatabaseEntry.findMany({
-      where: { status: "Published" },
-      select: { id: true, name: true },
-    }),
-    db.clientCitation.findMany({
-      where: {
-        clientId: BigInt(clientId),
-        citationDatabaseEntryId: null,
-      },
-      select: { id: true, directoryName: true },
-    }),
-  ]);
+function mapClientCitationAttachment(attachment) {
+  return {
+    id: Number(attachment.id),
+    citationId: Number(attachment.citation_id ?? attachment.citationId),
+    filename: attachment.filename,
+    mimeType: attachment.mime_type ?? attachment.mimeType,
+    sizeBytes: Number(attachment.size_bytes ?? attachment.sizeBytes ?? 0),
+    url: `/uploads/citation-attachments/${Number(
+      attachment.citation_id ?? attachment.citationId,
+    )}/${attachment.filename}`,
+    uploadedBy: attachment.uploaded_by
+      ? Number(attachment.uploaded_by)
+      : attachment.uploadedBy
+        ? Number(attachment.uploadedBy)
+        : null,
+    createdAt: attachment.created_at ?? attachment.createdAt,
+    updatedAt: attachment.updated_at ?? attachment.updatedAt,
+  };
+}
 
-  if (!templates.length || !citations.length) {
-    return;
+async function assertClientCitationExists({ db, clientId, citationId }) {
+  const citation = await db.clientCitation.findFirst({
+    where: {
+      id: BigInt(citationId),
+      clientId: BigInt(clientId),
+    },
+    select: { id: true },
+  });
+
+  if (!citation) {
+    throw new AppError(404, "NOT_FOUND", "Citation not found for this client.");
   }
 
-  const templateMap = new Map(
-    templates.map((template) => [
-      normalizeCitationDirectoryName(template.name),
-      template.id,
-    ]),
-  );
-
-  for (const citation of citations) {
-    const templateId = templateMap.get(
-      normalizeCitationDirectoryName(citation.directoryName),
-    );
-
-    if (!templateId) {
-      continue;
-    }
-
-    await db.clientCitation.update({
-      where: { id: citation.id },
-      data: { citationDatabaseEntryId: templateId },
-    });
-  }
+  return citation;
 }
 
 function mapClientProject(project) {
@@ -998,7 +1007,7 @@ function parseCitationStatus(
     throw new AppError(
       400,
       "VALIDATION_ERROR",
-      `${fieldName} must be COMPLETE, PENDING, INCOMPLETE, MISSING, or ERROR.`,
+      `${fieldName} must be COMPLETE, PENDING, SUBMITTED, INCOMPLETE, MISSING, or ERROR.`,
     );
   }
 
@@ -1006,7 +1015,7 @@ function parseCitationStatus(
     throw new AppError(
       400,
       "VALIDATION_ERROR",
-      `${fieldName} must be COMPLETE, PENDING, INCOMPLETE, MISSING, or ERROR.`,
+      `${fieldName} must be COMPLETE, PENDING, SUBMITTED, INCOMPLETE, MISSING, or ERROR.`,
     );
   }
 
@@ -2392,6 +2401,26 @@ async function updateClientGbpPosting({
   return mapClientGbpPosting(posting);
 }
 
+async function assertClientGbpPostingExists({ db, clientId, postingId }) {
+  const posting = await db.clientGbpPosting.findFirst({
+    where: {
+      id: BigInt(postingId),
+      clientId: BigInt(clientId),
+    },
+    select: { id: true },
+  });
+
+  if (!posting) {
+    throw new AppError(
+      404,
+      "NOT_FOUND",
+      "GBP posting not found for this client.",
+    );
+  }
+
+  return { id: Number(posting.id) };
+}
+
 async function deleteClientGbpPosting({ db, clientId, postingId }) {
   const posting = await db.clientGbpPosting.findFirst({
     where: {
@@ -2549,8 +2578,6 @@ async function listClientCitations({ db, clientId }) {
   if (!clientExists) {
     throw new AppError(404, "NOT_FOUND", "Client not found.");
   }
-
-  await backfillClientCitationTemplateLinks({ db, clientId });
 
   const citations = await db.clientCitation.findMany({
     where: { clientId: BigInt(clientId) },
@@ -3213,6 +3240,106 @@ async function deleteClientCitation({ db, clientId, citationId }) {
   return { deleted: true, id: citationId };
 }
 
+async function createClientCitationAttachment({
+  actorUserId,
+  clientId,
+  citationId,
+  db,
+  file,
+}) {
+  if (!file) {
+    throw new AppError(400, "VALIDATION_ERROR", "file is required.");
+  }
+
+  try {
+    await assertClientCitationExists({ db, clientId, citationId });
+  } catch (err) {
+    if (file.path) {
+      await fs.unlink(file.path).catch(() => {});
+    }
+    throw err;
+  }
+
+  const storagePath = path
+    .join(
+      "public",
+      "uploads",
+      "citation-attachments",
+      String(citationId),
+      file.filename,
+    )
+    .replace(/\\/g, "/");
+
+  const [created] = await db.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      INSERT INTO client_citation_attachments
+        (citation_id, filename, mime_type, size_bytes, storage_path, uploaded_by)
+      VALUES
+        (${BigInt(citationId)}, ${file.filename}, ${file.mimetype}, ${file.size}, ${storagePath}, ${
+          actorUserId ? BigInt(actorUserId) : null
+        })
+    `;
+
+    return tx.$queryRaw`
+      SELECT id, citation_id, filename, mime_type, size_bytes, storage_path, uploaded_by, created_at, updated_at
+      FROM client_citation_attachments
+      WHERE id = LAST_INSERT_ID()
+      LIMIT 1
+    `;
+  });
+
+  return mapClientCitationAttachment(created);
+}
+
+async function listClientCitationAttachments({ clientId, citationId, db }) {
+  await assertClientCitationExists({ db, clientId, citationId });
+
+  const attachments = await db.$queryRaw`
+    SELECT id, citation_id, filename, mime_type, size_bytes, storage_path, uploaded_by, created_at, updated_at
+    FROM client_citation_attachments
+    WHERE citation_id = ${BigInt(citationId)}
+    ORDER BY created_at DESC
+  `;
+
+  return attachments.map(mapClientCitationAttachment);
+}
+
+async function deleteClientCitationAttachment({
+  attachmentId,
+  clientId,
+  citationId,
+  db,
+}) {
+  await assertClientCitationExists({ db, clientId, citationId });
+
+  const [attachment] = await db.$queryRaw`
+    SELECT id, citation_id, filename, mime_type, size_bytes, storage_path, uploaded_by, created_at, updated_at
+    FROM client_citation_attachments
+    WHERE id = ${BigInt(attachmentId)} AND citation_id = ${BigInt(citationId)}
+    LIMIT 1
+  `;
+
+  if (!attachment) {
+    throw new AppError(404, "NOT_FOUND", "Attachment not found.");
+  }
+
+  await db.$executeRaw`
+    DELETE FROM client_citation_attachments
+    WHERE id = ${BigInt(attachmentId)} AND citation_id = ${BigInt(citationId)}
+  `;
+
+  const absolutePath = path.join(process.cwd(), attachment.storage_path);
+  try {
+    await fs.unlink(absolutePath);
+  } catch (err) {
+    if (err.code !== "ENOENT") {
+      throw err;
+    }
+  }
+
+  return { deleted: true, id: Number(attachment.id) };
+}
+
 async function listClientProjects({
   db,
   clientId,
@@ -3388,6 +3515,7 @@ module.exports = {
   generateClientGbpPostingContent,
   updateClientGbpPosting,
   deleteClientGbpPosting,
+  assertClientGbpPostingExists,
   listClientGbpPostingComments,
   createClientGbpPostingComment,
   deleteClientGbpPostingComment,
@@ -3397,6 +3525,9 @@ module.exports = {
   createClientCitation,
   updateClientCitation,
   deleteClientCitation,
+  createClientCitationAttachment,
+  listClientCitationAttachments,
+  deleteClientCitationAttachment,
   createClientProject,
   updateClientProject,
   deleteClientProject,

@@ -133,6 +133,18 @@ async function listClientLocalRankings(req, res, next) {
   }
 }
 
+async function listActiveScanRunsForClient(req, res, next) {
+  try {
+    const data = await scansService.listActiveScanRunsForClient({
+      db: req.app.locals.db,
+      clientId: readClientId(req),
+    });
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function getSavedLocalRankingKeywords(req, res, next) {
   try {
     const data = await scansService.getSavedLocalRankingKeywords({
@@ -281,6 +293,36 @@ async function runScan(req, res, next) {
   }
 }
 
+async function stopScanRun(req, res, next) {
+  try {
+    const scanId = readScanId(req);
+    const runId = readRunId(req);
+    const result = await scansService.stopScanRun({
+      db: req.app.locals.db,
+      io: req.app.locals.io,
+      scanId,
+      runId
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: 'LOCAL_RANK_SCAN_STOPPED',
+      resourceType: 'scan_run',
+      resourceId: runId,
+      metadata: {
+        scanId,
+        stopped: result.stopped
+      }
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listScanRuns(req, res, next) {
   try {
     const data = await scansService.listScanRuns({
@@ -341,6 +383,7 @@ module.exports = {
   createScan,
   listScans,
   listClientLocalRankings,
+  listActiveScanRunsForClient,
   getSavedLocalRankingKeywords,
   saveLocalRankingKeywords,
   clearSavedLocalRankingKeywords,
@@ -350,6 +393,7 @@ module.exports = {
   deleteScanById,
   deleteScanKeyword,
   runScan,
+  stopScanRun,
   listScanRuns,
   getScanRunById,
   listScanRunKeywordSummary,

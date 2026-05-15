@@ -3,12 +3,14 @@ const jwt = require('jsonwebtoken');
 
 const { AppError } = require('../../lib/errors');
 const { sendGbpPostingReviewOtpEmail } = require('../../lib/mailer');
+const notificationsService = require('../notifications/notifications.service');
 
 const REVIEW_SESSION_TYPE = 'gbp_posting_review';
 const EDITABLE_FIELDS = [
   ['postContent', 'Post Content'],
   ['images', 'Images'],
   ['buttonType', 'Button'],
+  ['status', 'Status'],
 ];
 
 function asString(value, fallback = '') {
@@ -97,11 +99,17 @@ function toPublicPath(token) {
   return `/gbp-posting-review/${token}`;
 }
 
+const SHARED_REVIEW_SESSION_TYPE = 'client_review';
+const ACCEPTED_REVIEW_SESSION_TYPES = new Set([
+  SHARED_REVIEW_SESSION_TYPE,
+  REVIEW_SESSION_TYPE,
+]);
+
 function signReviewSession({ env, link, reviewer }) {
   return jwt.sign(
     {
-      typ: REVIEW_SESSION_TYPE,
-      linkId: String(link.id),
+      typ: SHARED_REVIEW_SESSION_TYPE,
+      clientId: String(link.clientId),
       email: reviewer.email,
       name: reviewer.fullName,
     },
@@ -123,7 +131,7 @@ function verifyReviewSessionToken(token, env) {
       issuer: env.jwt.issuer,
     });
 
-    if (decoded.typ !== REVIEW_SESSION_TYPE) {
+    if (!ACCEPTED_REVIEW_SESSION_TYPES.has(decoded.typ)) {
       throw new Error('Invalid token type.');
     }
 
@@ -304,7 +312,7 @@ async function getDashboardState({ db, env, query }) {
 
   const posting = await getPostingRecord({ db, postingId });
 
-  const [link, activities, versions, comments] = await Promise.all([
+  let [link, activities, versions, comments] = await Promise.all([
     db.clientGbpPostingReviewLink.findFirst({
       orderBy: { createdAt: 'desc' },
       where: {
@@ -327,6 +335,14 @@ async function getDashboardState({ db, env, query }) {
       where: { postingId, source: { not: 'INTERNAL' } },
     }),
   ]);
+
+  if (link && link.expiresAt instanceof Date && link.expiresAt <= new Date()) {
+    await db.clientGbpPostingReviewLink.update({
+      where: { id: link.id },
+      data: { enabled: false, disabledAt: new Date() },
+    });
+    link = null;
+  }
 
   return {
     activities: activities.map(mapActivity),
@@ -544,15 +560,23 @@ async function findActiveLinkByToken({ db, token }) {
   return link;
 }
 
-async function publicStatus({ db, token }) {
+async function publicStatus({ db, env, reviewSessionToken, token }) {
   const link = await findActiveLinkByToken({ db, token });
   const posting = await getPostingRecord({ db, postingId: link.postingId });
+  const session = resolveReviewSession({ env, reviewSessionToken });
+  const isAuthenticated = Boolean(
+    session && String(session.clientId) === String(link.clientId),
+  );
 
   return {
     postingTitle: asString(posting.keyword) || 'GBP Posting',
     clientName: posting.client?.businessName || posting.client?.clientName || 'Client',
     expiresAt: link.expiresAt.toISOString(),
-    requiresOtp: true,
+    requiresOtp: !isAuthenticated,
+    authenticated: isAuthenticated,
+    reviewer: isAuthenticated
+      ? { email: session.email, fullName: session.name }
+      : null,
   };
 }
 
@@ -658,8 +682,8 @@ async function requireReviewSession({ db, env, reviewSessionToken, token }) {
   const link = await findActiveLinkByToken({ db, token });
   const session = verifyReviewSessionToken(reviewSessionToken, env);
 
-  if (String(link.id) !== String(session.linkId)) {
-    throw new AppError(403, 'FORBIDDEN', 'Review session does not match this link.');
+  if (String(link.clientId) !== String(session.clientId)) {
+    throw new AppError(403, 'FORBIDDEN', 'Review session does not match this client.');
   }
 
   return {
@@ -669,6 +693,18 @@ async function requireReviewSession({ db, env, reviewSessionToken, token }) {
       fullName: session.name,
     },
   };
+}
+
+function resolveReviewSession({ env, reviewSessionToken }) {
+  if (!reviewSessionToken) {
+    return null;
+  }
+
+  try {
+    return verifyReviewSessionToken(reviewSessionToken, env);
+  } catch {
+    return null;
+  }
 }
 
 async function getPublicContent({ db, env, reviewSessionToken, token }) {
@@ -722,6 +758,12 @@ function normalizePublicUpdatePayload(payload) {
     normalized.buttonType = trimmed.length > 0 ? trimmed : null;
   }
 
+  if (Object.prototype.hasOwnProperty.call(source, 'status')) {
+    const trimmed = asString(source.status).trim();
+
+    normalized.status = trimmed.length > 0 ? trimmed : 'Draft';
+  }
+
   return normalized;
 }
 
@@ -737,7 +779,7 @@ function stringifyComparable(value) {
   return String(value);
 }
 
-async function savePublicContent({ db, env, payload, reviewSessionToken, token }) {
+async function savePublicContent({ db, env, io, payload, publicUrl, reviewSessionToken, token }) {
   const { link, reviewer } = await requireReviewSession({
     db,
     env,
@@ -763,6 +805,9 @@ async function savePublicContent({ db, env, payload, reviewSessionToken, token }
         : {}),
       ...(Object.prototype.hasOwnProperty.call(patch, 'buttonType')
         ? { buttonType: patch.buttonType }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(patch, 'status')
+        ? { status: patch.status }
         : {}),
     },
   });
@@ -803,10 +848,27 @@ async function savePublicContent({ db, env, payload, reviewSessionToken, token }
     });
   }
 
+  try {
+    await notificationsService.notifyGbpPostingPublicReviewSaved({
+      action: 'SAVED',
+      db,
+      env,
+      io,
+      postingId: posting.id,
+      publicUrl: publicUrl || null,
+      reviewer,
+      status: updated.status,
+    });
+  } catch (notifyError) {
+    // Notification failures must not block the save flow.
+    // eslint-disable-next-line no-console
+    console.error('Failed to notify GBP review save', notifyError);
+  }
+
   return { posting: snapshotPosting({ ...posting, ...updated }), success: true };
 }
 
-async function addPublicComment({ db, env, payload, reviewSessionToken, token }) {
+async function addPublicComment({ db, env, io, payload, publicUrl, reviewSessionToken, token }) {
   const comment = asString(payload.comment).trim();
 
   if (!comment) {
@@ -844,6 +906,22 @@ async function addPublicComment({ db, env, payload, reviewSessionToken, token })
     newValue: comment,
     postingId: posting.id,
   });
+
+  try {
+    await notificationsService.notifyGbpPostingPublicReviewSaved({
+      action: 'COMMENT',
+      db,
+      env,
+      io,
+      postingId: posting.id,
+      publicUrl: publicUrl || null,
+      reviewer,
+      status: posting.status,
+    });
+  } catch (notifyError) {
+    // eslint-disable-next-line no-console
+    console.error('Failed to notify GBP review comment', notifyError);
+  }
 
   return { comment: mapComment(created) };
 }
@@ -892,6 +970,10 @@ async function deletePublicComment({ commentId, db, env, reviewSessionToken, tok
   return { success: true };
 }
 
+async function validatePublicReviewSession({ db, env, reviewSessionToken, token }) {
+  return requireReviewSession({ db, env, reviewSessionToken, token });
+}
+
 module.exports = {
   addPublicComment,
   deletePublicComment,
@@ -903,5 +985,6 @@ module.exports = {
   savePublicContent,
   sendLinkToClientReview,
   sendOtp,
+  validatePublicReviewSession,
   verifyOtp,
 };

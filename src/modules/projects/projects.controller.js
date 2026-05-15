@@ -513,7 +513,9 @@ async function listTaskComments(req, res, next) {
     const taskId = readTaskId(req);
     const comments = await projectsService.listTaskComments({
       db: req.app.locals.db,
-      taskId
+      taskId,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId
     });
 
     res.status(200).json({
@@ -555,6 +557,8 @@ async function listTaskActivity(req, res, next) {
     const data = await projectsService.listTaskActivity({
       db: req.app.locals.db,
       taskId,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId,
       before: req.query.before,
       limit: req.query.limit
     });

@@ -178,6 +178,25 @@ const NOTIFICATION_MODULES = [
         defaults: { inApp: true, email: true, discord: false }
       }
     ]
+  },
+  {
+    key: 'publicReviews',
+    title: 'Client public reviews',
+    description: 'Activity on public review links you sent to a client.',
+    events: [
+      {
+        key: 'PUBLIC_REVIEW_SAVED',
+        title: 'Client saved review changes',
+        description: 'When a client saves edits on a public review link (GBP post or website content). Broadcast to all team members.',
+        defaults: { inApp: true, email: true, discord: false }
+      },
+      {
+        key: 'PUBLIC_REVIEW_COMMENT_ADDED',
+        title: 'Client added a review comment',
+        description: 'When a client adds a comment on a public review link. Broadcast to all team members.',
+        defaults: { inApp: true, email: true, discord: false }
+      }
+    ]
   }
 ];
 
