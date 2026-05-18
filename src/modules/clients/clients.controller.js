@@ -1,4 +1,5 @@
 const clientsService = require("./clients.service");
+const usersService = require("../users/users.service");
 const { AppError } = require("../../lib/errors");
 const { writeAuditLog } = require("../../lib/audit-log");
 const fs = require("fs/promises");
@@ -458,6 +459,47 @@ async function patchClient(req, res, next) {
   }
 }
 
+async function deleteClient(req, res, next) {
+  try {
+    const clientId = readClientId(req);
+    const isSuperadmin = await usersService.isSuperadminUser({
+      db: req.app.locals.db,
+      env: req.app.locals.env,
+      userId: req.auth.userId,
+    });
+
+    if (!isSuperadmin) {
+      throw new AppError(
+        403,
+        "FORBIDDEN",
+        "Only superadmins can delete clients.",
+      );
+    }
+
+    const result = await clientsService.deleteClient({
+      db: req.app.locals.db,
+      clientId,
+    });
+
+    await writeAuditLog({
+      db: req.app.locals.db,
+      req,
+      actorUserId: req.auth.userId,
+      action: "CLIENT_DELETED",
+      resourceType: "client",
+      resourceId: clientId,
+      metadata: {
+        businessName: result.client.businessName,
+        clientName: result.client.clientName,
+      },
+    });
+
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function testClientDiscordConnection(req, res, next) {
   try {
     const clientId = readClientId(req);
@@ -708,6 +750,7 @@ module.exports = {
   listClientCitations,
   createClient,
   patchClient,
+  deleteClient,
   testClientDiscordConnection,
   createClientCitation,
   patchClientCitation,

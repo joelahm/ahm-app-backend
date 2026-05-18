@@ -1582,6 +1582,7 @@ async function getClientGbpReviews({
       clientId,
       placeId: profile.dataCid ? undefined : profile.placeId,
       dataId: profile.dataCid,
+      forceRefresh: query.forceRefresh,
       hl: query.hl,
       nextPageToken: query.nextPageToken,
       sortBy: query.sortBy,
@@ -3501,8 +3502,45 @@ async function listClientProjects({
   };
 }
 
+async function deleteClient({ db, clientId }) {
+  const normalizedClientId = BigInt(clientId);
+  const existingClient = await db.client.findUnique({
+    where: { id: normalizedClientId },
+    select: {
+      id: true,
+      businessName: true,
+      clientName: true,
+    },
+  });
+
+  if (!existingClient) {
+    throw new AppError(404, "NOT_FOUND", "Client not found.");
+  }
+
+  const updatedClient = await db.client.update({
+    where: { id: normalizedClientId },
+    data: { status: "DELETED" },
+    select: {
+      id: true,
+      businessName: true,
+      clientName: true,
+      status: true,
+    },
+  });
+
+  return {
+    client: {
+      id: String(updatedClient.id),
+      businessName: updatedClient.businessName,
+      clientName: updatedClient.clientName,
+      status: updatedClient.status,
+    },
+  };
+}
+
 module.exports = {
   createClient,
+  deleteClient,
   listClients,
   listClientDiscordStatuses,
   getClientById,

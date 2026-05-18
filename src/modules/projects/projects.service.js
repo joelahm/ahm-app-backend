@@ -180,6 +180,49 @@ async function assertTaskVisibleToActor({ db, taskId, actorUserId, actorRole }) 
   return task;
 }
 
+async function assertProjectVisibleToActor({
+  db,
+  projectId,
+  actorUserId,
+  actorRole,
+}) {
+  const project = await db.clientProject.findUnique({
+    where: { id: BigInt(projectId) },
+    select: {
+      accountManagerId: true,
+      clientSuccessManagerId: true,
+      id: true,
+      tasks: {
+        where: { assignedTo: BigInt(actorUserId) },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+
+  if (!project) {
+    throw new AppError(404, "NOT_FOUND", "Project not found.");
+  }
+
+  if (isAdminRole(actorRole)) {
+    return project;
+  }
+
+  const actorId = Number(actorUserId);
+  const isCsm =
+    project.clientSuccessManagerId &&
+    Number(project.clientSuccessManagerId) === actorId;
+  const isAm =
+    project.accountManagerId && Number(project.accountManagerId) === actorId;
+  const isTaskAssignee = project.tasks.length > 0;
+
+  if (!isCsm && !isAm && !isTaskAssignee) {
+    throw new AppError(403, "FORBIDDEN", "You cannot view this project.");
+  }
+
+  return project;
+}
+
 function normalizeTaskStatusOptionsValue(value) {
   const source = typeof value === "object" && value !== null ? value : {};
   const rawOptions = Array.isArray(source.statusOptions)
@@ -2116,6 +2159,129 @@ async function listTaskActivity({ actorRole, actorUserId, before, db, limit = 50
   };
 }
 
+async function listProjectActivity({
+  actorRole,
+  actorUserId,
+  before,
+  db,
+  limit = 50,
+  projectId,
+}) {
+  await assertProjectVisibleToActor({ db, projectId, actorUserId, actorRole });
+
+  const parsedLimit = Number(limit);
+  const safeLimit =
+    Number.isInteger(parsedLimit) && parsedLimit > 0
+      ? Math.min(parsedLimit, 100)
+      : 50;
+  let beforeDate = null;
+
+  if (before) {
+    beforeDate = new Date(before);
+    if (Number.isNaN(beforeDate.getTime())) {
+      throw new AppError(
+        400,
+        "VALIDATION_ERROR",
+        "before must be a valid ISO date.",
+      );
+    }
+  }
+
+  const createdAtFilter = beforeDate ? { lt: beforeDate } : undefined;
+  const [activities, projectAuditLogs] = await Promise.all([
+    db.taskActivity.findMany({
+      where: {
+        task: {
+          projectId: BigInt(projectId),
+        },
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      include: {
+        task: {
+          select: {
+            id: true,
+            taskName: true,
+            task: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: safeLimit + 1,
+    }),
+    db.auditLog.findMany({
+      where: {
+        resourceType: "client_project",
+        resourceId: String(projectId),
+        ...(createdAtFilter ? { createdAt: createdAtFilter } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: safeLimit + 1,
+    }),
+  ]);
+  const userIds = Array.from(
+    new Set(
+      [
+        ...activities.map((activity) => activity.actorUserId),
+        ...projectAuditLogs.map((log) => log.actorUserId),
+      ]
+        .filter(Boolean)
+        .map((id) => String(id)),
+    ),
+  );
+  const users = userIds.length
+    ? await db.user.findMany({
+        where: {
+          id: {
+            in: userIds.map((id) => BigInt(id)),
+          },
+        },
+        select: {
+          avatarUrl: true,
+          email: true,
+          firstName: true,
+          id: true,
+          lastName: true,
+        },
+      })
+    : [];
+  const usersById = new Map(users.map((user) => [String(user.id), user]));
+  const merged = [
+    ...activities.map((activity) => ({
+      kind: "event",
+      id: Number(activity.id),
+      type: activity.type,
+      metadata: {
+        ...(activity.metadataJson ?? {}),
+        taskId: Number(activity.taskId),
+        taskName:
+          activity.task?.taskName || activity.task?.task || "Untitled task",
+      },
+      createdAt: activity.createdAt,
+      actor: activity.actorUserId
+        ? mapActivityUser(usersById.get(String(activity.actorUserId)))
+        : null,
+    })),
+    ...projectAuditLogs.map((log) => ({
+      kind: "event",
+      id: `project-${log.id}`,
+      type: log.action,
+      metadata: log.metadata ?? {},
+      createdAt: log.createdAt,
+      actor: log.actorUserId
+        ? mapActivityUser(usersById.get(String(log.actorUserId)))
+        : null,
+    })),
+  ].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+  const items = merged.slice(0, safeLimit);
+  const hasMore = merged.length > safeLimit;
+  const oldest = items[items.length - 1];
+
+  return {
+    items,
+    cursor: hasMore && oldest ? new Date(oldest.createdAt).toISOString() : null,
+  };
+}
+
 async function createProjectComment({ db, actorUserId, projectId, payload }) {
   const text = String(payload.comment || "").trim();
   if (!text) {
@@ -2552,6 +2718,7 @@ module.exports = {
   listTaskComments,
   deleteTaskComment,
   listTaskActivity,
+  listProjectActivity,
   createProjectComment,
   listProjectComments,
   deleteProjectComment,

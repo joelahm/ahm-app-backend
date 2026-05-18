@@ -12,5 +12,6 @@ router.get('/', aiPromptsController.listPrompts);
 router.post('/', aiPromptsController.createPrompt);
 router.post('/next-id', aiPromptsController.reserveNextPromptId);
 router.patch('/:id', aiPromptsController.updatePrompt);
+router.delete('/:id', aiPromptsController.deletePrompt);
 
 module.exports = { aiPromptsRouter: router };

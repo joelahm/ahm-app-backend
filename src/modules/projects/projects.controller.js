@@ -569,6 +569,24 @@ async function listTaskActivity(req, res, next) {
   }
 }
 
+async function listProjectActivity(req, res, next) {
+  try {
+    const projectId = readProjectIdParam(req);
+    const data = await projectsService.listProjectActivity({
+      db: req.app.locals.db,
+      projectId,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId,
+      before: req.query.before,
+      limit: req.query.limit
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function createProjectComment(req, res, next) {
   try {
     const projectId = readProjectIdParam(req);
@@ -704,6 +722,7 @@ module.exports = {
   listTaskComments,
   deleteTaskComment,
   listTaskActivity,
+  listProjectActivity,
   createProjectComment,
   listProjectComments,
   deleteProjectComment,

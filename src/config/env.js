@@ -157,6 +157,16 @@ function readEnv() {
       aiTitleProvider: String(process.env.AI_TITLE_PROVIDER || "MANUS")
         .trim()
         .toUpperCase(),
+      keywordResearchDefaultProvider: (() => {
+        const allowed = new Set(["DATAFORSEO", "SE_RANKING"]);
+        const raw = String(
+          process.env.KEYWORD_RESEARCH_DEFAULT_PROVIDER || "SE_RANKING",
+        )
+          .trim()
+          .toUpperCase();
+
+        return allowed.has(raw) ? raw : "SE_RANKING";
+      })(),
       dataForSeo: {
         baseUrl:
           process.env.DATAFORSEO_BASE_URL || "https://api.dataforseo.com",
@@ -164,6 +174,17 @@ function readEnv() {
         password: process.env.DATAFORSEO_PASSWORD || null,
         cacheTtlMinutes: Number(
           process.env.DATAFORSEO_CACHE_TTL_MINUTES || 1440,
+        ),
+      },
+      seRanking: {
+        baseUrl:
+          process.env.SE_RANKING_BASE_URL || "https://api.seranking.com/v1",
+        apiKey: process.env.SE_RANKING_API_KEY || null,
+        cacheTtlMinutes: Number(
+          process.env.SE_RANKING_CACHE_TTL_MINUTES || 1440,
+        ),
+        requestsPerSecond: Number(
+          process.env.SE_RANKING_REQUESTS_PER_SECOND || 1,
         ),
       },
       serpApi: {

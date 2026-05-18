@@ -95,6 +95,18 @@ function attachSocketServer(server, context = {}) {
         socket.leave(`scan-run:${payload.runId}`);
       }
     });
+
+    socket.on('client-keywords:subscribe', (payload = {}) => {
+      if (payload.clientId) {
+        socket.join(`client:${payload.clientId}:keywords`);
+      }
+    });
+
+    socket.on('client-keywords:unsubscribe', (payload = {}) => {
+      if (payload.clientId) {
+        socket.leave(`client:${payload.clientId}:keywords`);
+      }
+    });
   });
 
   return io;

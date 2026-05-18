@@ -13,6 +13,7 @@ const { createPrismaClient } = require('./config/db');
 const { authRouter } = require('./modules/auth/auth.routes');
 const { usersRouter } = require('./modules/users/users.routes');
 const { clientsRouter } = require('./modules/clients/clients.routes');
+const { clientKeywordsRouter } = require('./modules/client-keywords/client-keywords.routes');
 const { onPageOptimizationsRouter } = require('./modules/on-page-optimizations/on-page-optimizations.routes');
 const { projectsRouter } = require('./modules/projects/projects.routes');
 const { integrationsRouter } = require('./modules/integrations/integrations.routes');
@@ -90,6 +91,7 @@ function createAuthApp() {
 
   app.use('/api/v1/users', usersRouter);
   app.use('/api/v1/clients/:clientId/on-page-optimizations', onPageOptimizationsRouter);
+  app.use('/api/v1/clients/:clientId/keywords', clientKeywordsRouter);
   app.use('/api/v1/clients', clientsRouter);
   app.use('/api/v1/projects', projectsRouter);
   app.use('/api/v1/integrations', integrationsRouter);

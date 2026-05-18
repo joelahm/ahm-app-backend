@@ -1,9 +1,18 @@
 const fs = require('fs/promises');
 const path = require('path');
 
+const sharp = require('sharp');
+
 const { AppError } = require('../../lib/errors');
 
 const ANTHROPIC_VERSION = '2023-06-01';
+// Keep layout references well below Anthropic's inline image limits. Large
+// design screenshots inflate the base64 payload and slow vision requests.
+const LAYOUT_IMAGE_MAX_DIMENSION = 1200;
+const LAYOUT_IMAGE_JPEG_QUALITY = 68;
+// 4-minute hard cap on the Anthropic call so an unresponsive upstream can't
+// keep a job pinned in "Generating" forever.
+const ANTHROPIC_REQUEST_TIMEOUT_MS = 4 * 60 * 1000;
 const LAYOUT_SYSTEM_DIRECTIVE = [
   'A reference page layout image is attached.',
   'Use it ONLY to infer: (a) what sections to include, (b) approximate length/word count per section, and (c) hierarchy/order.',
@@ -34,6 +43,27 @@ function inferMimeTypeFromExtension(extension) {
   }
 }
 
+async function compressLayoutBuffer(rawBuffer) {
+  // Resize to <=LAYOUT_IMAGE_MAX_DIMENSION on the long edge and recompress as
+  // JPEG. Keeps payload small (~hundreds of KB instead of MBs) so Anthropic
+  // can ingest it fast.
+  const optimized = await sharp(rawBuffer)
+    .rotate()
+    .resize({
+      width: LAYOUT_IMAGE_MAX_DIMENSION,
+      height: LAYOUT_IMAGE_MAX_DIMENSION,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .jpeg({ quality: LAYOUT_IMAGE_JPEG_QUALITY })
+    .toBuffer();
+
+  return {
+    buffer: optimized,
+    mimeType: 'image/jpeg',
+  };
+}
+
 async function loadLayoutImageBlock(layoutImageUrl) {
   const trimmed = String(layoutImageUrl || '').trim();
 
@@ -41,51 +71,38 @@ async function loadLayoutImageBlock(layoutImageUrl) {
     return null;
   }
 
-  if (/^https?:\/\//i.test(trimmed)) {
-    try {
+  let rawBuffer = null;
+
+  try {
+    if (/^https?:\/\//i.test(trimmed)) {
       const response = await fetch(trimmed);
 
       if (!response.ok) {
         return null;
       }
 
-      const mimeType = response.headers.get('content-type') || inferMimeTypeFromExtension(path.extname(trimmed));
+      rawBuffer = Buffer.from(await response.arrayBuffer());
+    } else {
+      const normalizedPath = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
+      const absolutePath = path.resolve(process.cwd(), 'public', normalizedPath);
+      const publicRoot = path.resolve(process.cwd(), 'public');
 
-      if (!mimeType || !SUPPORTED_LAYOUT_MIME_TYPES.has(mimeType)) {
+      if (!absolutePath.startsWith(publicRoot + path.sep)) {
         return null;
       }
 
-      const buffer = Buffer.from(await response.arrayBuffer());
-
-      return {
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: mimeType,
-          data: buffer.toString('base64'),
-        },
-      };
-    } catch {
-      return null;
+      rawBuffer = await fs.readFile(absolutePath);
     }
-  }
-
-  const normalizedPath = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed;
-  const absolutePath = path.resolve(process.cwd(), 'public', normalizedPath);
-  const publicRoot = path.resolve(process.cwd(), 'public');
-
-  if (!absolutePath.startsWith(publicRoot + path.sep)) {
+  } catch {
     return null;
   }
 
-  const mimeType = inferMimeTypeFromExtension(path.extname(absolutePath));
-
-  if (!mimeType || !SUPPORTED_LAYOUT_MIME_TYPES.has(mimeType)) {
+  if (!rawBuffer || rawBuffer.length === 0) {
     return null;
   }
 
   try {
-    const buffer = await fs.readFile(absolutePath);
+    const { buffer, mimeType } = await compressLayoutBuffer(rawBuffer);
 
     return {
       type: 'image',
@@ -96,7 +113,27 @@ async function loadLayoutImageBlock(layoutImageUrl) {
       },
     };
   } catch {
-    return null;
+    // If sharp can't decode the buffer, fall back to the original bytes only
+    // when they are small enough for inline use.
+    if (rawBuffer.length > 4 * 1024 * 1024) {
+      return null;
+    }
+
+    const fallbackMime =
+      inferMimeTypeFromExtension(path.extname(trimmed)) || 'image/jpeg';
+
+    if (!SUPPORTED_LAYOUT_MIME_TYPES.has(fallbackMime)) {
+      return null;
+    }
+
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: fallbackMime,
+        data: rawBuffer.toString('base64'),
+      },
+    };
   }
 }
 
@@ -275,6 +312,11 @@ async function generateMedicalWebsiteContent({
 
   let response;
   let responsePayload;
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(
+    () => abortController.abort(),
+    ANTHROPIC_REQUEST_TIMEOUT_MS,
+  );
 
   try {
     response = await fetch(endpoint, {
@@ -285,13 +327,26 @@ async function generateMedicalWebsiteContent({
         'x-api-key': config.apiKey,
       },
       method: 'POST',
+      signal: abortController.signal,
     });
     responsePayload = await response.json().catch(() => null);
   } catch (error) {
-    throw new AppError(502, 'UPSTREAM_API_ERROR', 'Anthropic request failed.', {
-      cause: error instanceof Error ? error.message : String(error),
-      provider: 'ANTHROPIC',
-    });
+    const isTimeout =
+      error?.name === 'AbortError' || abortController.signal.aborted;
+
+    throw new AppError(
+      isTimeout ? 504 : 502,
+      isTimeout ? 'UPSTREAM_TIMEOUT' : 'UPSTREAM_API_ERROR',
+      isTimeout
+        ? `Anthropic request timed out after ${Math.round(ANTHROPIC_REQUEST_TIMEOUT_MS / 1000)}s.`
+        : 'Anthropic request failed.',
+      {
+        cause: error instanceof Error ? error.message : String(error),
+        provider: 'ANTHROPIC',
+      },
+    );
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   const text = extractAnthropicText(responsePayload);

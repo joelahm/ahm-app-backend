@@ -117,7 +117,7 @@ async function listDataForSeoKeywordRegions(req, res, next) {
 
 async function dataForSeoSimilarKeywords(req, res, next) {
   try {
-    const data = await integrationsService.fetchDataForSeoSimilarKeywords({
+    const data = await integrationsService.fetchSimilarKeywordsMultiProvider({
       db: req.app.locals.db,
       env: req.app.locals.env,
       requestedBy: req.auth.userId,
@@ -131,7 +131,7 @@ async function dataForSeoSimilarKeywords(req, res, next) {
 
 async function dataForSeoKeywordSuggestions(req, res, next) {
   try {
-    const data = await integrationsService.fetchDataForSeoKeywordSuggestions({
+    const data = await integrationsService.fetchKeywordSuggestionsMultiProvider({
       db: req.app.locals.db,
       env: req.app.locals.env,
       requestedBy: req.auth.userId,
@@ -145,7 +145,7 @@ async function dataForSeoKeywordSuggestions(req, res, next) {
 
 async function dataForSeoKeywordOverview(req, res, next) {
   try {
-    const data = await integrationsService.fetchDataForSeoKeywordOverview({
+    const data = await integrationsService.fetchKeywordOverviewMultiProvider({
       db: req.app.locals.db,
       env: req.app.locals.env,
       requestedBy: req.auth.userId,

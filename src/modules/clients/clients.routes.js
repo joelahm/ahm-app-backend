@@ -54,6 +54,7 @@ router.get('/:id/citations', requireAnyPermission(CLIENT_READ_PERMISSIONS), clie
 // Service scopes non-admins to projects they're connected to.
 router.get('/:id/projects', clientsController.listClientProjects);
 router.post('/', requirePermission('add-new-client'), clientsController.createClient);
+router.delete('/:id', clientsController.deleteClient);
 router.post('/:id/discord/test', requirePermission('edit-location-details'), clientsController.testClientDiscordConnection);
 router.post('/:id/citations', requirePermission('edit-location-details'), clientsController.createClientCitation);
 router.patch(

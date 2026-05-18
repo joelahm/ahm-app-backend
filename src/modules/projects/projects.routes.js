@@ -42,6 +42,7 @@ router.get('/tasks/:taskId/comments', projectsController.listTaskComments);
 router.post('/tasks/:taskId/comments', requirePermission('edit-location-details'), projectsController.createTaskComment);
 router.delete('/tasks/comments/:commentId', requirePermission('edit-location-details'), projectsController.deleteTaskComment);
 router.get('/tasks/:taskId/activity', projectsController.listTaskActivity);
+router.get('/:projectId/activity', projectsController.listProjectActivity);
 router.get('/:projectId/comments', requireAnyPermission(PROJECT_READ_PERMISSIONS), projectsController.listProjectComments);
 router.post('/:projectId/comments', requirePermission('edit-location-details'), projectsController.createProjectComment);
 router.delete('/comments/:commentId', requirePermission('edit-location-details'), projectsController.deleteProjectComment);

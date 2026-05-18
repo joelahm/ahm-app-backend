@@ -393,8 +393,26 @@ async function updatePrompt({ db, promptId, payload }) {
   }
 }
 
+async function deletePrompt({ db, promptId }) {
+  await migrateLegacyAiPromptsIfNeeded({ db });
+
+  const existingPrompt = await db.aiPrompt.findUnique({
+    where: { id: promptId },
+    select: { id: true }
+  });
+
+  if (!existingPrompt) {
+    throw new AppError(404, 'NOT_FOUND', 'AI prompt not found.');
+  }
+
+  await db.aiPrompt.delete({ where: { id: promptId } });
+
+  return { success: true };
+}
+
 module.exports = {
   createPrompt,
+  deletePrompt,
   getAiPrompts,
   reserveNextPromptId,
   updatePrompt

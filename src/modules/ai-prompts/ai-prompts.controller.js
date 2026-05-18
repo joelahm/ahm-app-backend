@@ -52,8 +52,22 @@ async function updatePrompt(req, res, next) {
   }
 }
 
+async function deletePrompt(req, res, next) {
+  try {
+    const data = await aiPromptsService.deletePrompt({
+      db: req.app.locals.db,
+      promptId: String(req.params.id || '')
+    });
+
+    res.status(200).json(data);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   createPrompt,
+  deletePrompt,
   listPrompts,
   reserveNextPromptId,
   updatePrompt

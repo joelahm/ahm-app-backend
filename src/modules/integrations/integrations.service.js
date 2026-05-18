@@ -695,6 +695,10 @@ async function getJson(url, options) {
   return { response, payload };
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function requireDataForSeoConfig(env) {
   if (!env.integrations.dataForSeo.login || !env.integrations.dataForSeo.password) {
     throw new AppError(500, 'INTEGRATION_CONFIG_ERROR', 'DATAFORSEO_LOGIN && DATAFORSEO_PASSWORD are required.');
@@ -1584,26 +1588,29 @@ async function fetchSerpApiReviews({ db, env, requestedBy, payload }) {
   if (!params.get('place_id') && !params.get('data_id')) {
     throw new AppError(400, 'VALIDATION_ERROR', 'placeId or dataId is required.');
   }
+  const forceRefresh = parseBooleanLike(payload.forceRefresh);
 
   const endpoint = `${env.integrations.serpApi.baseUrl}${SERPAPI_ENDPOINTS.search}?${params.toString()}`;
   const requestPayload = Object.fromEntries(params.entries());
   requestPayload.api_key = '[redacted]';
   const cacheNamespace = 'SERPAPI_REVIEWS';
   const requestHash = buildRequestHash(cacheNamespace, requestPayload);
-  const cached = await findCachedExternalApiLog({
-    db,
-    cacheNamespace,
-    requestHash,
-    ttlMinutes: env.integrations.serpApi.cacheTtlMinutes
-  });
-  if (cached) {
-    return {
-      logId: Number(cached.id),
-      provider: 'SERPAPI',
-      operation: 'REVIEWS',
-      cached: true,
-      raw: cached.responsePayload
-    };
+  if (!forceRefresh) {
+    const cached = await findCachedExternalApiLog({
+      db,
+      cacheNamespace,
+      requestHash,
+      ttlMinutes: env.integrations.serpApi.cacheTtlMinutes
+    });
+    if (cached) {
+      return {
+        logId: Number(cached.id),
+        provider: 'SERPAPI',
+        operation: 'REVIEWS',
+        cached: true,
+        raw: cached.responsePayload
+      };
+    }
   }
   const { response, payload: responsePayload } = await getJson(endpoint);
   const success = response.ok;
@@ -2002,6 +2009,575 @@ async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
   };
 }
 
+// ============================================================================
+// Multi-provider keyword research orchestrator
+// ----------------------------------------------------------------------------
+// Each provider implements a fetch function that returns
+// { provider, ok: true/false, keywords: [{ keyword, searchVolume, kd, cpc,
+// intent, serp }] }. The orchestrator fans out to all enabled providers via
+// Promise.allSettled so a single provider failure does not block the others,
+// then merges per-keyword averaging numeric metrics and tagging each row
+// with the provider initials that contributed.
+// ============================================================================
+
+const KEYWORD_PROVIDER_KEYS = ['DATAFORSEO', 'SE_RANKING'];
+
+function normalizeProvidersInput(value, env) {
+  const fallback = (() => {
+    const candidate = String(
+      env?.integrations?.keywordResearchDefaultProvider || 'SE_RANKING',
+    )
+      .trim()
+      .toUpperCase();
+
+    return KEYWORD_PROVIDER_KEYS.includes(candidate) ? candidate : 'SE_RANKING';
+  })();
+
+  if (!Array.isArray(value) || value.length === 0) {
+    return [fallback];
+  }
+
+  const upperCased = value
+    .map((entry) => String(entry || '').trim().toUpperCase())
+    .filter((entry) => KEYWORD_PROVIDER_KEYS.includes(entry));
+
+  return upperCased.length ? Array.from(new Set(upperCased)) : [fallback];
+}
+
+async function adaptDataForSeoResult(promise, providerKey) {
+  const result = await promise;
+
+  return {
+    provider: providerKey,
+    ok: true,
+    keywords: Array.isArray(result?.keywords) ? result.keywords : [],
+    cached: Boolean(result?.cached),
+    logId: result?.logId ?? null,
+  };
+}
+
+// Provider fetcher tables. Each operation maps a provider key to a fetcher.
+// DataForSEO uses the existing concrete clients; SE Ranking returns a graceful
+// no-op result until its API access is configured.
+const KEYWORD_PROVIDER_FETCHERS = {
+  OVERVIEW: {
+    DATAFORSEO: (ctx) =>
+      adaptDataForSeoResult(fetchDataForSeoKeywordOverview(ctx), 'DATAFORSEO'),
+    SE_RANKING: (_ctx) => fetchSeRankingKeywordOverview(_ctx),
+  },
+  SIMILAR: {
+    DATAFORSEO: (ctx) =>
+      adaptDataForSeoResult(fetchDataForSeoSimilarKeywords(ctx), 'DATAFORSEO'),
+    SE_RANKING: (_ctx) => fetchSeRankingSimilarKeywords(_ctx),
+  },
+  SUGGESTIONS: {
+    DATAFORSEO: (ctx) =>
+      adaptDataForSeoResult(fetchDataForSeoKeywordSuggestions(ctx), 'DATAFORSEO'),
+    SE_RANKING: (_ctx) => fetchSeRankingKeywordSuggestions(_ctx),
+  },
+};
+
+// ---- SE Ranking client ---------------------------------------------------
+// Docs: https://seranking.com/api/data/keyword-research/
+// Base URL: https://api.seranking.com/v1
+// Auth header: `Authorization: Token <API_KEY>`
+//
+// Three endpoints we use:
+//   POST /keywords/export        — keyword overview (form-data: keywords[])
+//   GET  /keywords/similar       — similar keywords (query: keyword=)
+//   GET  /keywords/related       — related/suggestion keywords (query: keyword=)
+// All three take a required `source` query param (country code: us, uk, ...).
+// Paginated responses are `{ total, keywords: [...] }`; the export endpoint
+// returns a top-level array. `mapSeRankingRows` handles both shapes.
+
+const SE_RANKING_SOURCE_OVERRIDES = {
+  GB: 'uk', // SE Ranking exposes the United Kingdom as `uk`, not `gb`
+};
+
+const SE_RANKING_INTENT_LABELS = {
+  I: 'Informational',
+  N: 'Navigational',
+  C: 'Commercial',
+  T: 'Transactional',
+  L: 'Local',
+};
+
+let seRankingRequestQueue = Promise.resolve();
+let seRankingNextRequestAt = 0;
+
+function normalizeSeRankingBaseUrl(rawBaseUrl) {
+  const fallback = 'https://api.seranking.com/v1';
+  let url;
+
+  try {
+    url = new URL(rawBaseUrl || fallback);
+  } catch (_error) {
+    url = new URL(fallback);
+  }
+
+  // api4.seranking.com is the older Project API host. Keyword Research belongs
+  // to the Data API and must use api.seranking.com/v1.
+  if (url.hostname === 'api4.seranking.com') {
+    return 'https://api.seranking.com/v1/';
+  }
+
+  if (url.hostname === 'api.seranking.com' && !url.pathname.startsWith('/v1')) {
+    url.pathname = '/v1';
+  }
+
+  url.pathname = url.pathname.replace(/\/+$/, '') || '/v1';
+  url.search = '';
+  url.hash = '';
+
+  return `${url.toString().replace(/\/+$/, '')}/`;
+}
+
+function buildSeRankingUrl(baseUrl, path) {
+  return new URL(String(path || '').replace(/^\/+/, ''), normalizeSeRankingBaseUrl(baseUrl));
+}
+
+async function scheduleSeRankingRequest(requester, requestsPerSecond) {
+  const normalizedRps = Number(requestsPerSecond);
+  const intervalMs = 1000 / (Number.isFinite(normalizedRps) && normalizedRps > 0 ? normalizedRps : 1);
+
+  const queuedRequest = seRankingRequestQueue.then(async () => {
+    const waitMs = Math.max(0, seRankingNextRequestAt - Date.now());
+
+    if (waitMs > 0) {
+      await delay(waitMs);
+    }
+
+    seRankingNextRequestAt = Date.now() + intervalMs;
+
+    return requester();
+  });
+
+  seRankingRequestQueue = queuedRequest.catch(() => {});
+
+  return queuedRequest;
+}
+
+function getRetryAfterMs(response) {
+  const retryAfter = response?.headers?.get?.('retry-after');
+
+  if (!retryAfter) {
+    return null;
+  }
+
+  const seconds = Number(retryAfter);
+
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const retryDate = Date.parse(retryAfter);
+
+  if (Number.isFinite(retryDate)) {
+    return Math.max(0, retryDate - Date.now());
+  }
+
+  return null;
+}
+
+async function requestSeRankingWithRetry(requester, maxAttempts = 3) {
+  let result = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    result = await requester();
+
+    if (result.response.status !== 429 || attempt === maxAttempts) {
+      return result;
+    }
+
+    const retryAfterMs = getRetryAfterMs(result.response);
+    const backoffMs = retryAfterMs ?? ((2 ** (attempt - 1)) * 1000 + Math.floor(Math.random() * 250));
+
+    await delay(backoffMs);
+  }
+
+  return result;
+}
+
+function resolveSeRankingSource(payload) {
+  const raw = String(payload?.countryIsoCode || '').trim().toUpperCase();
+
+  if (!raw) {
+    return 'us';
+  }
+
+  return SE_RANKING_SOURCE_OVERRIDES[raw] || raw.toLowerCase();
+}
+
+function mapSeRankingIntents(value) {
+  if (!Array.isArray(value) || value.length === 0) {
+    return null;
+  }
+
+  const labels = value
+    .map((code) => SE_RANKING_INTENT_LABELS[String(code || '').toUpperCase()] || null)
+    .filter(Boolean);
+
+  return labels.length ? labels.join(', ') : null;
+}
+
+function mapSeRankingRows(responsePayload, fallbackKeyword) {
+  const rows = Array.isArray(responsePayload)
+    ? responsePayload
+    : Array.isArray(responsePayload?.keywords)
+      ? responsePayload.keywords
+      : Array.isArray(responsePayload?.data)
+        ? responsePayload.data
+        : [];
+
+  return rows
+    .map((entry, index) => {
+      const keyword =
+        entry?.keyword || entry?.term || entry?.query || fallbackKeyword || null;
+
+      if (!keyword) {
+        return null;
+      }
+
+      const searchVolume = Number(entry?.volume);
+      const difficulty = Number(entry?.difficulty);
+      const cpc = Number(entry?.cpc);
+      const intent = mapSeRankingIntents(entry?.intents);
+      const serpFeatures = Array.isArray(entry?.serp_features)
+        ? entry.serp_features
+        : [];
+
+      return {
+        id: `${String(keyword).toLowerCase().replace(/[^a-z0-9]+/g, '-')}-ser-${index + 1}`,
+        keyword,
+        searchVolume: Number.isFinite(searchVolume) ? searchVolume : null,
+        kd: Number.isFinite(difficulty) ? difficulty : null,
+        intent,
+        serp: serpFeatures.length ? String(serpFeatures[0]) : null,
+        cpc: Number.isFinite(cpc) ? cpc : null,
+      };
+    })
+    .filter(Boolean);
+}
+
+function extractSeRankingErrorMessage(responsePayload, status) {
+  if (!responsePayload) {
+    return `SE Ranking request failed (status ${status}).`;
+  }
+
+  if (typeof responsePayload === 'string') {
+    return responsePayload;
+  }
+
+  return (
+    responsePayload.message ||
+    (typeof responsePayload.error === 'string'
+      ? responsePayload.error
+      : responsePayload.error?.message || responsePayload.error?.description) ||
+    responsePayload.detail ||
+    (Array.isArray(responsePayload.errors)
+      ? responsePayload.errors.map((entry) => entry?.message || JSON.stringify(entry)).join('; ')
+      : null) ||
+    `SE Ranking request failed (status ${status}).`
+  );
+}
+
+async function runSeRankingResearch({ env, payload, operation }) {
+  const apiKey = env.integrations.seRanking?.apiKey;
+
+  if (!apiKey) {
+    return {
+      provider: 'SE_RANKING',
+      ok: false,
+      keywords: [],
+      notConfigured: true,
+    };
+  }
+
+  const keyword = optionalString(payload?.keyword);
+
+  if (!keyword) {
+    return {
+      provider: 'SE_RANKING',
+      ok: false,
+      keywords: [],
+      error: 'keyword is required',
+    };
+  }
+
+  const source = resolveSeRankingSource(payload);
+  const baseUrl =
+    env.integrations.seRanking.baseUrl || 'https://api.seranking.com/v1';
+  const requestsPerSecond = env.integrations.seRanking.requestsPerSecond || 1;
+  const limit = Number(payload?.limit) > 0 ? Number(payload.limit) : 100;
+
+  try {
+    if (operation === 'OVERVIEW') {
+      const url = buildSeRankingUrl(baseUrl, 'keywords/export');
+
+      url.searchParams.set('source', source);
+
+      const form = new URLSearchParams();
+
+      form.append('keywords[]', keyword);
+
+      const { response, payload: responsePayload } = await requestSeRankingWithRetry(() =>
+        scheduleSeRankingRequest(
+          () =>
+            postJson(url.toString(), {
+              method: 'POST',
+              headers: {
+                Authorization: `Token ${apiKey}`,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                Accept: 'application/json',
+              },
+              body: form.toString(),
+            }),
+          requestsPerSecond,
+        ),
+      );
+
+      if (!response.ok) {
+        return {
+          provider: 'SE_RANKING',
+          ok: false,
+          keywords: [],
+          error: extractSeRankingErrorMessage(responsePayload, response.status),
+          upstreamStatus: response.status,
+        };
+      }
+
+      return {
+        provider: 'SE_RANKING',
+        ok: true,
+        keywords: mapSeRankingRows(responsePayload, keyword),
+      };
+    }
+
+    const segmentMap = { SIMILAR: 'similar', SUGGESTIONS: 'related' };
+    const segment = segmentMap[operation];
+
+    if (!segment) {
+      return {
+        provider: 'SE_RANKING',
+        ok: false,
+        keywords: [],
+        error: `Unknown SE Ranking operation: ${operation}`,
+      };
+    }
+
+    const url = buildSeRankingUrl(baseUrl, `keywords/${segment}`);
+
+    url.searchParams.set('source', source);
+    url.searchParams.set('keyword', keyword);
+    url.searchParams.set('limit', String(limit));
+
+    const { response, payload: responsePayload } = await requestSeRankingWithRetry(() =>
+      scheduleSeRankingRequest(
+        () =>
+          getJson(url.toString(), {
+            method: 'GET',
+            headers: {
+              Authorization: `Token ${apiKey}`,
+              Accept: 'application/json',
+            },
+          }),
+        requestsPerSecond,
+      ),
+    );
+
+    if (!response.ok) {
+      return {
+        provider: 'SE_RANKING',
+        ok: false,
+        keywords: [],
+        error: extractSeRankingErrorMessage(responsePayload, response.status),
+        upstreamStatus: response.status,
+      };
+    }
+
+    return {
+      provider: 'SE_RANKING',
+      ok: true,
+      keywords: mapSeRankingRows(responsePayload, keyword),
+    };
+  } catch (error) {
+    return {
+      provider: 'SE_RANKING',
+      ok: false,
+      keywords: [],
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function fetchSeRankingKeywordOverview(ctx) {
+  return runSeRankingResearch({ ...ctx, operation: 'OVERVIEW' });
+}
+
+async function fetchSeRankingSimilarKeywords(ctx) {
+  return runSeRankingResearch({ ...ctx, operation: 'SIMILAR' });
+}
+
+async function fetchSeRankingKeywordSuggestions(ctx) {
+  return runSeRankingResearch({ ...ctx, operation: 'SUGGESTIONS' });
+}
+
+function avgIgnoringNulls(values) {
+  const numeric = values
+    .filter((value) => value !== null && value !== undefined && Number.isFinite(Number(value)))
+    .map((value) => Number(value));
+
+  if (!numeric.length) {
+    return null;
+  }
+
+  return numeric.reduce((sum, value) => sum + value, 0) / numeric.length;
+}
+
+function pickFirst(values) {
+  for (const value of values) {
+    if (value !== null && value !== undefined && String(value).trim()) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function mergeKeywordRowsByProvider(perProviderResults) {
+  const buckets = new Map();
+
+  for (const result of perProviderResults) {
+    if (!result?.keywords?.length) {
+      continue;
+    }
+
+    for (const row of result.keywords) {
+      const keyword = String(row?.keyword || '').trim();
+
+      if (!keyword) {
+        continue;
+      }
+
+      const key = keyword.toLowerCase();
+      let bucket = buckets.get(key);
+
+      if (!bucket) {
+        bucket = {
+          keyword,
+          contributions: [],
+          sources: {},
+        };
+        buckets.set(key, bucket);
+      }
+
+      bucket.contributions.push({ provider: result.provider, row });
+      bucket.sources[result.provider] = {
+        searchVolume: row.searchVolume ?? null,
+        kd: row.kd ?? null,
+        cpc: row.cpc ?? null,
+        intent: row.intent ?? null,
+        serp: row.serp ?? null,
+      };
+    }
+  }
+
+  return Array.from(buckets.values()).map((bucket, index) => {
+    const volumes = bucket.contributions.map(({ row }) => row.searchVolume);
+    const kds = bucket.contributions.map(({ row }) => row.kd);
+    const cpcs = bucket.contributions.map(({ row }) => row.cpc);
+    const searchVolumeAvg = avgIgnoringNulls(volumes);
+    const kdAvg = avgIgnoringNulls(kds);
+    const cpcAvg = avgIgnoringNulls(cpcs);
+
+    return {
+      id: `${bucket.keyword.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${index + 1}`,
+      keyword: bucket.keyword,
+      searchVolume: searchVolumeAvg === null ? null : Math.round(searchVolumeAvg),
+      kd: kdAvg === null ? null : Math.round(kdAvg),
+      cpc: cpcAvg === null ? null : Number(cpcAvg.toFixed(2)),
+      intent: pickFirst(bucket.contributions.map(({ row }) => row.intent)),
+      serp: pickFirst(bucket.contributions.map(({ row }) => row.serp)),
+      sources: bucket.sources,
+    };
+  });
+}
+
+async function orchestrateKeywordProviders({ db, env, requestedBy, payload, operation }) {
+  const fetchers = KEYWORD_PROVIDER_FETCHERS[operation];
+
+  if (!fetchers) {
+    throw new AppError(500, 'INTERNAL_ERROR', `Unknown keyword operation: ${operation}`);
+  }
+
+  const providers = normalizeProvidersInput(payload?.providers, env);
+  const ctx = { db, env, requestedBy, payload };
+  const settled = await Promise.allSettled(
+    providers.map((providerKey) => fetchers[providerKey](ctx)),
+  );
+
+  const perProviderResults = settled.map((entry, index) => {
+    const providerKey = providers[index];
+
+    if (entry.status === 'fulfilled') {
+      return entry.value;
+    }
+
+    return {
+      provider: providerKey,
+      ok: false,
+      keywords: [],
+      error: entry.reason instanceof Error ? entry.reason.message : String(entry.reason),
+    };
+  });
+
+  const successfulProviders = perProviderResults.filter((result) => result.ok);
+
+  // If every provider failed, surface the first error so the caller knows
+  // why the response is empty. (Otherwise an empty keyword list looks like
+  // a "no results" instead of an upstream error.)
+  if (!successfulProviders.length) {
+    const firstError = perProviderResults.find((result) => result.error);
+
+    if (firstError) {
+      const isRateLimited =
+        firstError.upstreamStatus === 429 ||
+        /too many requests|rate limit/i.test(String(firstError.error || ''));
+
+      throw new AppError(
+        isRateLimited ? 429 : 502,
+        isRateLimited ? 'UPSTREAM_RATE_LIMITED' : 'UPSTREAM_API_ERROR',
+        firstError.error || 'Keyword research providers all failed.',
+      );
+    }
+  }
+
+  const keywords = mergeKeywordRowsByProvider(perProviderResults);
+
+  return {
+    keywords,
+    providers: perProviderResults.map((result) => ({
+      provider: result.provider,
+      ok: Boolean(result.ok),
+      notConfigured: Boolean(result.notConfigured),
+      error: result.error ?? null,
+      keywordCount: Array.isArray(result.keywords) ? result.keywords.length : 0,
+    })),
+  };
+}
+
+async function fetchKeywordOverviewMultiProvider(ctx) {
+  return orchestrateKeywordProviders({ ...ctx, operation: 'OVERVIEW' });
+}
+
+async function fetchSimilarKeywordsMultiProvider(ctx) {
+  return orchestrateKeywordProviders({ ...ctx, operation: 'SIMILAR' });
+}
+
+async function fetchKeywordSuggestionsMultiProvider(ctx) {
+  return orchestrateKeywordProviders({ ...ctx, operation: 'SUGGESTIONS' });
+}
+
 module.exports = {
   syncDataForSeoGoogleAdsReferenceData,
   syncDataForSeoGoogleAdsLocations,
@@ -2014,6 +2590,9 @@ module.exports = {
   fetchDataForSeoKeywordOverview,
   fetchDataForSeoSimilarKeywords,
   fetchDataForSeoKeywordSuggestions,
+  fetchKeywordOverviewMultiProvider,
+  fetchSimilarKeywordsMultiProvider,
+  fetchKeywordSuggestionsMultiProvider,
   fetchSerpApiGbpDetails,
   fetchSerpApiReviews,
   fetchManusGeneratedText

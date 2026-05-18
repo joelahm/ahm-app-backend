@@ -2,6 +2,341 @@ const { AppError } = require('../../lib/errors');
 const anthropicContentService = require('../ai-content/anthropic.service');
 
 const GENERATED_CONTENT_PLACEHOLDER = '__GENERATED_CONTENT__';
+const CLIENT_KEYWORDS_LOCATION = '__client_keywords__';
+
+// Canonical content-type labels accepted by AI Hub. Must mirror the frontend's
+// `normalizePageTypeForPrompt` in client-website-content-screen.tsx and the
+// WEB_CONTENT_TYPE_OPTIONS list in lib/web-content-types.ts. Whitespace-
+// insensitive lookup; falls back to the raw label trimmed.
+const WEBSITE_CONTENT_TYPE_LABELS = [
+  'Homepage',
+  'About Us Page',
+  'Treatment Page',
+  'Condition Page',
+  'Service Page',
+  'Department Page',
+  'Location Page',
+  'Doctor Profile Page',
+  'Team Page',
+  'Patient Information Page',
+  'Blog Page',
+  'Guide Page',
+  'FAQ Page',
+  'Case Study',
+  'Press Release',
+  'Contact Page',
+  'Book Appointment Page',
+  'Consultation Page',
+  'Second Opinion Page',
+  'Pricing Page',
+  'Landing Page',
+  'Feedback Page',
+  'Privacy Policy',
+  'Terms and Conditions',
+  'Cookie Policy',
+  'Medical Disclaimer',
+  '404 Page',
+];
+
+function normalizeWebsiteContentTypeForPrompt(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+
+  if (!normalized) {
+    return '';
+  }
+
+  const exact = WEBSITE_CONTENT_TYPE_LABELS.find(
+    (label) => label.toLowerCase() === normalized,
+  );
+
+  if (exact) return exact;
+
+  // Aliases — mirror the frontend's normalizePageTypeForPrompt fall-throughs.
+  if (normalized.includes('home')) return 'Homepage';
+  if (normalized.includes('treatment') || normalized.includes('service')) {
+    return 'Treatment Page';
+  }
+  if (normalized.includes('condition')) return 'Condition Page';
+  if (normalized.includes('blog')) return 'Blog Page';
+  if (normalized.includes('press')) return 'Press Release';
+
+  return String(value || '').trim();
+}
+
+function normalizePromptTokenMap(values) {
+  return Object.fromEntries(
+    Object.entries(values || {}).map(([key, value]) => [
+      String(key).toLowerCase(),
+      value === undefined || value === null ? '' : String(value),
+    ]),
+  );
+}
+
+function resolveAiPromptTemplate(template, values) {
+  const normalized = normalizePromptTokenMap(values);
+
+  return String(template || '')
+    .replace(
+      /{{\s*([a-zA-Z0-9_]+)\s*}}/g,
+      (_, token) => normalized[String(token).toLowerCase()] ?? '',
+    )
+    .replace(
+      /\[([A-Z0-9_]+)\]/g,
+      (_, token) => normalized[String(token).toLowerCase()] ?? '',
+    );
+}
+
+function stringifyJsonList(value) {
+  if (!Array.isArray(value)) return '';
+
+  return value
+    .map((item) => {
+      if (typeof item === 'string') return item.trim();
+      if (item && typeof item === 'object') {
+        const source = item;
+
+        return String(
+          source.name ?? source.label ?? source.title ?? source.value ?? '',
+        ).trim();
+      }
+
+      return String(item ?? '').trim();
+    })
+    .filter(Boolean)
+    .join(', ');
+}
+
+function stringifyPracticeHours(hours) {
+  if (!Array.isArray(hours) || hours.length === 0) return '';
+
+  return hours
+    .map((item) => {
+      const day = String(item?.day || '').trim();
+
+      if (!day) return '';
+      if (!item?.enabled) return `${day}: Closed`;
+
+      const start = [item?.startTime, item?.startMeridiem]
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter(Boolean)
+        .join(' ');
+      const end = [item?.endTime, item?.endMeridiem]
+        .map((value) => (typeof value === 'string' ? value.trim() : ''))
+        .filter(Boolean)
+        .join(' ');
+
+      return start && end ? `${day}: ${start} - ${end}` : `${day}: Open`;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function buildWebsiteContentPromptValues({
+  client,
+  contentType,
+  contentLength,
+  contentTitle,
+  intent,
+  keyword,
+}) {
+  const safeClient = client || {};
+  const businessName = asString(safeClient.businessName);
+  const website = asString(safeClient.website);
+  const cityState = asString(safeClient.cityState);
+  const country = asString(safeClient.country);
+  const profession = asString(safeClient.profession);
+  const niche = asString(safeClient.niche);
+  const practiceIntroduction = asString(safeClient.practiceIntroduction);
+  const targetArea = asString(safeClient.visibleArea);
+  const normalizedType = normalizeWebsiteContentTypeForPrompt(contentType);
+
+  return {
+    address: [
+      safeClient.addressLine1,
+      safeClient.addressLine2,
+      cityState,
+      country,
+    ]
+      .map((value) => asString(value))
+      .filter(Boolean)
+      .join(', '),
+    address_line_1: asString(safeClient.addressLine1),
+    address_line_2: asString(safeClient.addressLine2),
+    audience: '',
+    brand_name: businessName,
+    business_name: businessName,
+    business_phone: asString(safeClient.businessPhone),
+    city_state: cityState,
+    client_building_name: asString(safeClient.buildingName),
+    client_business_email: asString(safeClient.practiceEmail),
+    client_business_name: businessName,
+    client_business_phone: asString(safeClient.businessPhone),
+    client_city_state: cityState,
+    client_conditions_treated: stringifyJsonList(safeClient.conditionsTreated),
+    client_country: country,
+    client_credentials: asString(safeClient.credentials),
+    client_discord_channel: asString(safeClient.discordChannel),
+    client_facebook: asString(safeClient.facebook),
+    client_gbp_link: asString(safeClient.gbpLink),
+    client_gmc_registration_number: asString(safeClient.gmcRegistrationNumber),
+    client_instagram: asString(safeClient.instagram),
+    client_linkedin: asString(safeClient.linkedin),
+    client_major_accomplishments: asString(safeClient.majorAccomplishments),
+    client_name: asString(safeClient.clientName),
+    client_nearby_areas_served: asString(safeClient.nearbyAreasServed),
+    client_niche: niche,
+    client_personal_email: asString(safeClient.personalEmail),
+    client_personal_phone: asString(safeClient.personalPhone),
+    client_post_code: asString(safeClient.postCode),
+    client_practice_hours: stringifyPracticeHours(safeClient.practiceHours),
+    client_practice_introduction: practiceIntroduction,
+    client_practice_structure: asString(safeClient.practiceStructure),
+    client_profession: profession,
+    client_region: asString(safeClient.region),
+    client_special_interests: stringifyJsonList(safeClient.specialInterests),
+    client_street_address: asString(safeClient.streetAddress),
+    client_sub_specialty: stringifyJsonList(safeClient.subSpecialties),
+    client_sub_specialties: stringifyJsonList(safeClient.subSpecialties),
+    client_target_area: targetArea,
+    client_title: profession,
+    client_top_medical_specialties: stringifyJsonList(
+      safeClient.topMedicalSpecialties,
+    ),
+    client_top_treatments: stringifyJsonList(safeClient.topTreatments),
+    client_treatment_and_services: stringifyJsonList(
+      safeClient.treatmentAndServices,
+    ),
+    client_type_of_practice: asString(safeClient.typeOfPractice),
+    client_unique_to_competitors: asString(safeClient.uniqueToCompetitors),
+    client_unit_number: asString(safeClient.unitNumber),
+    client_visible_area: targetArea,
+    client_website: website,
+    content_type: normalizedType,
+    country,
+    intent: asString(intent),
+    keyword: asString(keyword),
+    location: cityState || country,
+    max_character: asString(contentLength),
+    max_characters: asString(contentLength),
+    niche,
+    page_type: normalizedType,
+    personal_email: asString(safeClient.personalEmail),
+    post_code: asString(safeClient.postCode),
+    practice_email: asString(safeClient.practiceEmail),
+    practice_introduction: practiceIntroduction,
+    profession,
+    topic: asString(keyword),
+    url: website,
+    webcontent_audience: '',
+    webcontent_content_length: asString(contentLength),
+    webcontent_content_type: normalizedType,
+    webcontent_intent: asString(intent),
+    webcontent_keyword: asString(keyword),
+    webcontent_search_volume: '',
+    webcontent_title: asString(contentTitle),
+    webcontent_topic: asString(keyword),
+    website,
+  };
+}
+
+function buildLengthInstruction(contentLength) {
+  const value = asString(contentLength).trim();
+
+  if (!value) {
+    return 'Use a reasonable length appropriate for the page type.';
+  }
+
+  return `Aim for approximately ${value}. Do not pad with filler.`;
+}
+
+const WEBSITE_CONTENT_FORMATTING_FOOTER = [
+  '',
+  'FORMATTING REQUIREMENT:',
+  'Return clean semantic HTML suitable for a WYSIWYG editor. Use exactly one <h1> near the top for the main page title, use <h2> for primary sections, use <h3> only when needed for subsections, use <p> for body copy, and use <ul>/<ol>/<li> where appropriate. Do not return markdown, code fences, inline styles, or wrapper tags like <html> or <body>.',
+  '',
+  'COMPLETION REQUIREMENT:',
+  'Finish with a complete sentence and a complete final section. Do not end with an unfinished paragraph, incomplete word, partial HTML tag, markdown fragment, dangling "<", or dangling character. Close every opened tag before the answer ends.',
+].join('\n');
+
+async function resolveWebsiteContentPromptFromAiHub({
+  db,
+  clientId,
+  contentType,
+  contentLength,
+  contentTitle,
+  intent,
+  keyword,
+  clusterType,
+  parentPillarTopic,
+}) {
+  const normalizedContentType = normalizeWebsiteContentTypeForPrompt(contentType);
+
+  if (!normalizedContentType) {
+    throw new AppError(400, 'VALIDATION_ERROR', 'Content type is required.');
+  }
+
+  const promptRecord = await db.aiPrompt.findFirst({
+    where: {
+      status: 'Active',
+      typeOfPost: normalizedContentType,
+    },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  if (!promptRecord || !promptRecord.prompt) {
+    throw new AppError(
+      400,
+      'AI_PROMPT_NOT_FOUND',
+      `No active AI Hub prompt found for "${normalizedContentType}". Create or activate one in Settings → AI Hub.`,
+    );
+  }
+
+  const client = await db.client.findUnique({
+    where: { id: BigInt(clientId) },
+  });
+
+  if (!client) {
+    throw new AppError(404, 'NOT_FOUND', 'Client not found.');
+  }
+
+  const values = buildWebsiteContentPromptValues({
+    client,
+    contentType: normalizedContentType,
+    contentLength,
+    contentTitle,
+    intent,
+    keyword,
+  });
+
+  const resolvedBody = resolveAiPromptTemplate(promptRecord.prompt, values).trim();
+
+  if (!resolvedBody) {
+    throw new AppError(
+      400,
+      'AI_PROMPT_RESOLUTION_FAILED',
+      `Resolved AI Hub prompt is empty for "${normalizedContentType}".`,
+    );
+  }
+
+  const normalizedCluster = String(clusterType || '').trim().toLowerCase();
+  const clusterInstruction =
+    normalizedCluster === 'pillar'
+      ? 'This is a pillar content page. Write broad, comprehensive, authority-style content for the main topic.'
+      : normalizedCluster === 'cluster'
+        ? `This is a cluster content page. Write focused subtopic content that semantically supports the pillar topic "${asString(parentPillarTopic)}". Include internal linking context to the pillar page when relevant.`
+        : '';
+
+  const clusterBlock = clusterInstruction
+    ? `${clusterInstruction}\nCluster Type: ${normalizedCluster || 'standalone'}\nParent Pillar Topic: ${asString(parentPillarTopic) || 'N/A'}`
+    : '';
+
+  const lengthBlock = `FINAL LENGTH REQUIREMENT:\n${buildLengthInstruction(contentLength)}`;
+
+  return [resolvedBody, clusterBlock, lengthBlock, WEBSITE_CONTENT_FORMATTING_FOOTER]
+    .filter(Boolean)
+    .join('\n\n')
+    .trim();
+}
 
 function asString(value, fallback = '') {
   return typeof value === 'string' ? value : fallback;
@@ -325,7 +660,10 @@ async function createKeywordContentList({ actorUserId, db, payload }) {
 
 async function listKeywordContentLists({ db, query }) {
   const clientId = parseOptionalUnsignedBigInt(query.clientId, 'clientId');
-  const where = clientId ? { clientId } : {};
+  const where = {
+    ...(clientId ? { clientId } : {}),
+    location: { not: CLIENT_KEYWORDS_LOCATION },
+  };
   const records = await db.keywordContentList.findMany({
     orderBy: {
       createdAt: 'desc',
@@ -339,7 +677,39 @@ async function listKeywordContentLists({ db, query }) {
   };
 }
 
-async function updateKeywordContentListKeyword({ actorUserId, db, payload }) {
+// In-process per-list mutex. Every write to a `keyword_content_lists` row's
+// `keywords_json` is a read-modify-write — without this, two concurrent jobs
+// (e.g. pillar + cluster generated in parallel) snapshot the same JSON, then
+// the later write overwrites the earlier one's status. Symptom: one job
+// "completes" but its peer reverts to "Generating" forever.
+const listKeywordWriteQueues = new Map();
+
+function runWithListLock(listId, task) {
+  const key = String(listId);
+  const previous = listKeywordWriteQueues.get(key) || Promise.resolve();
+  // Chain regardless of previous outcome so one failure doesn't block the
+  // queue. Track the head as a non-throwing variant.
+  const next = previous.then(task, task);
+  const safeNext = next.catch(() => undefined);
+
+  listKeywordWriteQueues.set(key, safeNext);
+  // Keep the map bounded: once we're at the tail, drop the entry.
+  safeNext.then(() => {
+    if (listKeywordWriteQueues.get(key) === safeNext) {
+      listKeywordWriteQueues.delete(key);
+    }
+  });
+
+  return next;
+}
+
+async function updateKeywordContentListKeyword(options) {
+  return runWithListLock(options?.payload?.listId, () =>
+    updateKeywordContentListKeywordImpl(options),
+  );
+}
+
+async function updateKeywordContentListKeywordImpl({ actorUserId, db, payload }) {
   const listId = parseUnsignedBigInt(payload.listId, 'listId');
   const keywordId = parseRequiredString(payload.keywordId, 'keywordId');
   const hasParentKeywordId = Object.prototype.hasOwnProperty.call(
@@ -573,7 +943,6 @@ async function runWebsiteContentGenerationJob({
   const listId = String(parseUnsignedBigInt(payload.listId, 'listId'));
   const keywordId = parseRequiredString(payload.keywordId, 'keywordId');
   const clientId = String(parseUnsignedBigInt(payload.clientId, 'clientId'));
-  const contentPrompt = parseRequiredString(payload.contentPrompt, 'contentPrompt');
   const seoPromptTemplate = parseRequiredString(payload.seoPromptTemplate, 'seoPromptTemplate');
   const contentLength = parseRequiredString(payload.contentLength, 'contentLength');
   const contentType = parseRequiredString(payload.contentType, 'contentType');
@@ -581,6 +950,20 @@ async function runWebsiteContentGenerationJob({
   const maxContentTokens = parsePositiveInteger(payload.maxContentTokens, 'maxContentTokens', 4096);
   const maxSeoTokens = parsePositiveInteger(payload.maxSeoTokens, 'maxSeoTokens', 700);
   const layoutImageUrl = parseOptionalString(payload.layoutImageUrl);
+  // Context the FE supplies for prompt resolution. Keyword/intent are required
+  // for the AI Hub template tokens; cluster/parent are optional and only used
+  // for the cluster instruction block.
+  const promptKeyword =
+    parseOptionalString(payload.keyword) || parseOptionalString(payload.contentKeyword) || '';
+  const promptIntent = parseOptionalString(payload.intent) || '';
+  const promptClusterType = parseOptionalString(payload.clusterType) || '';
+  const promptParentPillarTopic =
+    parseOptionalString(payload.parentPillarTopic) || '';
+  const logTag = `[WebsiteContentJob list=${listId} keyword=${keywordId}]`;
+  const jobStartedAt = Date.now();
+
+  // eslint-disable-next-line no-console
+  console.log(`${logTag} start`, { hasLayoutImage: Boolean(layoutImageUrl) });
 
   await updateKeywordContentListKeyword({
     actorUserId,
@@ -593,11 +976,38 @@ async function runWebsiteContentGenerationJob({
   });
 
   try {
+    // Resolve the AI Hub prompt SERVER-SIDE so the prompt body is authoritative
+    // and cannot be tampered with client-side. The FE's `contentPrompt` (if
+    // any) is intentionally ignored — Settings → AI Hub is the source of truth.
+    const resolvedPromptStartedAt = Date.now();
+    const resolvedPrompt = await resolveWebsiteContentPromptFromAiHub({
+      db,
+      clientId,
+      contentType,
+      contentLength,
+      contentTitle: title,
+      intent: promptIntent,
+      keyword: promptKeyword || title,
+      clusterType: promptClusterType,
+      parentPillarTopic: promptParentPillarTopic,
+    });
+    // eslint-disable-next-line no-console
+    console.log(`${logTag} prompt resolved from AI Hub`, {
+      ms: Date.now() - resolvedPromptStartedAt,
+      contentType,
+      promptLength: resolvedPrompt.length,
+    });
+
+    const contentStartedAt = Date.now();
     const generatedRaw = await anthropicContentService.generateMedicalWebsiteContent({
       env,
       maxOutputTokens: maxContentTokens,
-      prompt: contentPrompt,
+      prompt: resolvedPrompt,
       layoutImageUrl,
+    });
+    // eslint-disable-next-line no-console
+    console.log(`${logTag} content call done`, {
+      ms: Date.now() - contentStartedAt,
     });
     const generatedText =
       typeof generatedRaw === 'string'
@@ -613,15 +1023,21 @@ async function runWebsiteContentGenerationJob({
     const seoPrompt = seoPromptTemplate.includes(GENERATED_CONTENT_PLACEHOLDER)
       ? seoPromptTemplate.replace(GENERATED_CONTENT_PLACEHOLDER, plainContent)
       : `${seoPromptTemplate}\n\nContent:\n${plainContent}`;
+    const seoStartedAt = Date.now();
     const seoRaw = await anthropicContentService.generateMedicalWebsiteContent({
       env,
       maxOutputTokens: maxSeoTokens,
       prompt: seoPrompt,
     });
+    // eslint-disable-next-line no-console
+    console.log(`${logTag} SEO call done`, {
+      ms: Date.now() - seoStartedAt,
+    });
     const seoText =
       typeof seoRaw === 'string' ? seoRaw : asString(seoRaw?.text);
     const seoFields = parseGeneratedSeoFields(seoText);
 
+    const persistStartedAt = Date.now();
     await updateKeywordContentListKeyword({
       actorUserId,
       db,
@@ -640,7 +1056,17 @@ async function runWebsiteContentGenerationJob({
         title,
       },
     });
+    // eslint-disable-next-line no-console
+    console.log(`${logTag} completed`, {
+      persistMs: Date.now() - persistStartedAt,
+      totalMs: Date.now() - jobStartedAt,
+    });
   } catch (error) {
+    // eslint-disable-next-line no-console
+    console.error(`${logTag} failing`, {
+      message: error instanceof Error ? error.message : String(error),
+      totalMs: Date.now() - jobStartedAt,
+    });
     await updateKeywordContentListKeyword({
       actorUserId,
       db,
@@ -649,7 +1075,15 @@ async function runWebsiteContentGenerationJob({
         listId,
         status: 'Failed',
       },
-    }).catch(() => {});
+    }).catch((persistError) => {
+      // eslint-disable-next-line no-console
+      console.error(`${logTag} failed to persist Failed status`, {
+        message:
+          persistError instanceof Error
+            ? persistError.message
+            : String(persistError),
+      });
+    });
 
     throw error;
   }
@@ -689,7 +1123,13 @@ async function startWebsiteContentGeneration({ actorUserId, db, env, payload }) 
   };
 }
 
-async function deleteKeywordContentListKeyword({ actorUserId, db, query }) {
+async function deleteKeywordContentListKeyword(options) {
+  return runWithListLock(options?.query?.listId, () =>
+    deleteKeywordContentListKeywordImpl(options),
+  );
+}
+
+async function deleteKeywordContentListKeywordImpl({ actorUserId, db, query }) {
   const listId = parseUnsignedBigInt(query.listId, 'listId');
   const keywordId = parseRequiredString(query.keywordId, 'keywordId');
 
