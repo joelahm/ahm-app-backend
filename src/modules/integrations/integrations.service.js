@@ -2208,6 +2208,28 @@ function resolveSeRankingSource(payload) {
   return SE_RANKING_SOURCE_OVERRIDES[raw] || raw.toLowerCase();
 }
 
+function normalizeSeRankingKeywordList(payload) {
+  const rawKeywords = Array.isArray(payload?.keywords)
+    ? payload.keywords
+    : [payload?.keyword];
+  const seen = new Set();
+
+  return rawKeywords
+    .map((item) => optionalString(item))
+    .filter(Boolean)
+    .filter((item) => {
+      const key = item.toLowerCase();
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+
+      return true;
+    });
+}
+
 function mapSeRankingIntents(value) {
   if (!Array.isArray(value) || value.length === 0) {
     return null;
@@ -2293,17 +2315,6 @@ async function runSeRankingResearch({ env, payload, operation }) {
     };
   }
 
-  const keyword = optionalString(payload?.keyword);
-
-  if (!keyword) {
-    return {
-      provider: 'SE_RANKING',
-      ok: false,
-      keywords: [],
-      error: 'keyword is required',
-    };
-  }
-
   const source = resolveSeRankingSource(payload);
   const baseUrl =
     env.integrations.seRanking.baseUrl || 'https://api.seranking.com/v1';
@@ -2312,13 +2323,28 @@ async function runSeRankingResearch({ env, payload, operation }) {
 
   try {
     if (operation === 'OVERVIEW') {
+      const keywords = normalizeSeRankingKeywordList(payload);
+
+      if (!keywords.length) {
+        return {
+          provider: 'SE_RANKING',
+          ok: false,
+          keywords: [],
+          error: 'keywords is required and must contain at least one keyword',
+        };
+      }
+
       const url = buildSeRankingUrl(baseUrl, 'keywords/export');
 
       url.searchParams.set('source', source);
 
-      const form = new URLSearchParams();
+      const form = new FormData();
 
-      form.append('keywords[]', keyword);
+      keywords.forEach((keyword) => {
+        form.append('keywords[]', keyword);
+      });
+      form.append('sort', 'cpc');
+      form.append('sort_order', 'desc');
 
       const { response, payload: responsePayload } = await requestSeRankingWithRetry(() =>
         scheduleSeRankingRequest(
@@ -2327,10 +2353,9 @@ async function runSeRankingResearch({ env, payload, operation }) {
               method: 'POST',
               headers: {
                 Authorization: `Token ${apiKey}`,
-                'Content-Type': 'application/x-www-form-urlencoded',
                 Accept: 'application/json',
               },
-              body: form.toString(),
+              body: form,
             }),
           requestsPerSecond,
         ),
@@ -2349,7 +2374,18 @@ async function runSeRankingResearch({ env, payload, operation }) {
       return {
         provider: 'SE_RANKING',
         ok: true,
-        keywords: mapSeRankingRows(responsePayload, keyword),
+        keywords: mapSeRankingRows(responsePayload, keywords[0]),
+      };
+    }
+
+    const keyword = optionalString(payload?.keyword);
+
+    if (!keyword) {
+      return {
+        provider: 'SE_RANKING',
+        ok: false,
+        keywords: [],
+        error: 'keyword is required',
       };
     }
 
