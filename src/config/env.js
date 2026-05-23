@@ -61,6 +61,18 @@ function readEmailList(value) {
     .filter(Boolean);
 }
 
+function readAiProvider(value, defaultValue = "MANUS") {
+  const normalized = String(value || "")
+    .trim()
+    .toUpperCase();
+
+  if (["ANTHROPIC", "OPENAI", "MANUS"].includes(normalized)) {
+    return normalized;
+  }
+
+  return defaultValue;
+}
+
 function readEnv() {
   const required = ["ACCESS_TOKEN_SECRET", "REFRESH_TOKEN_SECRET"];
 
@@ -154,9 +166,11 @@ function readEnv() {
       googleRefreshToken: process.env.GOOGLE_SMTP_REFRESH_TOKEN || null,
     },
     integrations: {
-      aiTitleProvider: String(process.env.AI_TITLE_PROVIDER || "MANUS")
-        .trim()
-        .toUpperCase(),
+      aiTitleProvider: readAiProvider(process.env.AI_TITLE_PROVIDER, "MANUS"),
+      gbpPostingAiProvider: readAiProvider(
+        process.env.GBP_POSTING_AI_PROVIDER,
+        "ANTHROPIC",
+      ),
       keywordResearchDefaultProvider: (() => {
         const allowed = new Set(["DATAFORSEO", "SE_RANKING"]);
         const raw = String(

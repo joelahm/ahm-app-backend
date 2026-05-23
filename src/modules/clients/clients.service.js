@@ -1859,24 +1859,25 @@ async function generateClientGbpPostings({
     acc[typeOfPost] = matching[0] || null;
     return acc;
   }, {});
-  const missingPromptType = promptTypes.find(
-    (typeOfPost) => !promptByType[typeOfPost]?.prompt,
-  );
-  if (missingPromptType) {
-    throw new AppError(
-      400,
-      "VALIDATION_ERROR",
-      `No active AI prompt found for ${missingPromptType}.`,
-    );
-  }
-
   const createdPostings = [];
   const generations = [];
+  const skipped = [];
 
   for (const item of items) {
     const promptType = getGbpPromptType(item.contentType);
     const promptRecord = promptByType[promptType];
     const generatedTextsForItem = [];
+
+    if (!promptRecord?.prompt) {
+      skipped.push({
+        code: "AI_PROMPT_NOT_FOUND",
+        contentType: item.contentType,
+        keyword: item.keyword,
+        message: `No active AI prompt found for ${promptType}.`,
+        promptType,
+      });
+      continue;
+    }
 
     for (let postIndex = 1; postIndex <= item.numberOfPosts; postIndex += 1) {
       const resolvedPrompt = resolveAiPromptTemplate(
@@ -1892,11 +1893,16 @@ async function generateClientGbpPostings({
       ).trim();
 
       if (!resolvedPrompt) {
-        throw new AppError(
-          400,
-          "VALIDATION_ERROR",
-          `Resolved prompt is empty for ${promptType}.`,
-        );
+        skipped.push({
+          code: "AI_PROMPT_RESOLUTION_FAILED",
+          contentType: item.contentType,
+          keyword: item.keyword,
+          message: `Resolved prompt is empty for ${promptType}.`,
+          postIndex,
+          promptId: promptRecord.id,
+          promptType,
+        });
+        break;
       }
 
       const variationAngle =
@@ -1929,37 +1935,63 @@ async function generateClientGbpPostings({
         .join("\n")
         .trim();
 
-      const generated = await integrationsService.fetchManusGeneratedText({
-        db,
-        env,
-        requestedBy: actorUserId,
-        payload: {
-          auditContext: {
-            clientId: Number(client.id),
-            feature: "GBP_POSTINGS",
-            keyword: item.keyword,
-            promptId: promptRecord.id,
-            promptType,
-            resolvedPromptPreview: promptWithUniquenessInstruction.slice(
-              0,
-              1200,
-            ),
-            postIndex,
-            totalPosts: item.numberOfPosts,
+      let generated;
+      try {
+        generated = await integrationsService.fetchManusGeneratedText({
+          db,
+          env,
+          requestedBy: actorUserId,
+          payload: {
+            auditContext: {
+              clientId: Number(client.id),
+              feature: "GBP_POSTINGS",
+              keyword: item.keyword,
+              promptId: promptRecord.id,
+              promptType,
+              resolvedPromptPreview: promptWithUniquenessInstruction.slice(
+                0,
+                1200,
+              ),
+              postIndex,
+              totalPosts: item.numberOfPosts,
+            },
+            clientId,
+            maxCharacters: Number(promptRecord.maxCharacter || 1500),
+            prompt: promptWithUniquenessInstruction,
+            provider: env.integrations.gbpPostingAiProvider,
           },
-          clientId,
-          maxCharacters: Number(promptRecord.maxCharacter || 1500),
-          prompt: promptWithUniquenessInstruction,
-          provider: "OPENAI",
-        },
-      });
+        });
+      } catch (error) {
+        skipped.push({
+          code:
+            error && typeof error === "object" && error.code
+              ? error.code
+              : "AI_GENERATION_FAILED",
+          contentType: item.contentType,
+          keyword: item.keyword,
+          message:
+            error instanceof Error
+              ? error.message
+              : `AI generation failed for ${promptType}.`,
+          postIndex,
+          promptId: promptRecord.id,
+          promptType,
+        });
+        break;
+      }
+
       const generatedText = String(generated.text || "").trim();
       if (!generatedText) {
-        throw new AppError(
-          502,
-          "UPSTREAM_API_ERROR",
-          `AI returned empty content for ${promptType}.`,
-        );
+        skipped.push({
+          code: "AI_EMPTY_CONTENT",
+          contentType: item.contentType,
+          keyword: item.keyword,
+          message: `AI returned empty content for ${promptType}.`,
+          postIndex,
+          promptId: promptRecord.id,
+          promptType,
+        });
+        break;
       }
       generatedTextsForItem.push(generatedText);
 
@@ -2016,6 +2048,7 @@ async function generateClientGbpPostings({
   return {
     generations,
     postings: createdPostings,
+    skipped,
     total: createdPostings.length,
   };
 }
@@ -2152,7 +2185,7 @@ async function generateClientGbpPostingContent({
       clientId,
       maxCharacters: Number(promptRecord.maxCharacter || 1500),
       prompt: resolvedPrompt,
-      provider: "OPENAI",
+      provider: env.integrations.gbpPostingAiProvider,
     },
   });
   const content = String(generated.text || "").trim();
