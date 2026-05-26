@@ -24,6 +24,8 @@ public/uploads/avatars/*
 !public/uploads/avatars/.gitkeep
 public/uploads/clients/*
 !public/uploads/clients/.gitkeep
+public/uploads/website-content-layouts/*
+!public/uploads/website-content-layouts/.gitkeep
 
 # framework/tooling
 .next/

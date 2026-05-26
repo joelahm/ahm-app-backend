@@ -15,6 +15,7 @@ const CLIENT_KEYWORD_TITLE_STATUSES = new Set([
 ]);
 const CLIENT_KEYWORD_PROVIDERS = new Set(["DATAFORSEO", "SE_RANKING"]);
 const TITLE_GENERATION_CONCURRENCY = 3;
+const META_TITLE_PROMPT_TYPE = "Meta Title";
 
 function parseRequiredString(value, fieldName, maxLength = 255) {
   const normalized = String(value || "").trim();
@@ -108,6 +109,94 @@ function normalizeClientKeywordProvider(value) {
     .toUpperCase();
 
   return CLIENT_KEYWORD_PROVIDERS.has(key) ? key : null;
+}
+
+function normalizePromptTokenMap(values) {
+  return Object.fromEntries(
+    Object.entries(values || {}).map(([key, value]) => [
+      String(key).toLowerCase(),
+      value === undefined || value === null ? "" : String(value),
+    ]),
+  );
+}
+
+function resolveAiPromptTemplate(template, values) {
+  const normalized = normalizePromptTokenMap(values);
+
+  return String(template || "")
+    .replace(
+      /{{\s*([a-zA-Z0-9_]+)\s*}}/g,
+      (_, token) => normalized[String(token).toLowerCase()] ?? "",
+    )
+    .replace(
+      /\[([A-Z0-9_]+)\]/g,
+      (_, token) => normalized[String(token).toLowerCase()] ?? "",
+    );
+}
+
+function buildMetaTitlePromptValues({ client, keyword, contentType }) {
+  const safeClient = client || {};
+  const businessName = String(safeClient.businessName || "").trim();
+  const cityState = String(safeClient.cityState || "").trim();
+  const country = String(safeClient.country || "").trim();
+  const profession = String(safeClient.profession || "").trim();
+  const pageType = String(contentType || "").trim();
+  const website = String(safeClient.website || "").trim();
+
+  return {
+    brand_name: businessName,
+    business_name: businessName,
+    business_phone: String(safeClient.businessPhone || "").trim(),
+    client_business_name: businessName,
+    client_business_email: String(safeClient.practiceEmail || "").trim(),
+    client_business_phone: String(safeClient.businessPhone || "").trim(),
+    client_city_state: cityState,
+    client_country: country,
+    client_name: String(safeClient.clientName || "").trim(),
+    client_niche: String(safeClient.niche || "").trim(),
+    client_personal_email: String(safeClient.personalEmail || "").trim(),
+    client_personal_phone: String(safeClient.personalPhone || "").trim(),
+    client_practice_introduction: String(
+      safeClient.practiceIntroduction || "",
+    ).trim(),
+    client_profession: profession,
+    client_target_area: String(safeClient.visibleArea || "").trim(),
+    client_title: profession,
+    client_website: website,
+    content_type: pageType,
+    country,
+    keyword: String(keyword || "").trim(),
+    location: cityState || country,
+    niche: String(safeClient.niche || "").trim(),
+    page_type: pageType,
+    practice_email: String(safeClient.practiceEmail || "").trim(),
+    practice_introduction: String(safeClient.practiceIntroduction || "").trim(),
+    profession,
+    topic: String(keyword || "").trim(),
+    url: website,
+    webcontent_content_type: pageType,
+    webcontent_keyword: String(keyword || "").trim(),
+    webcontent_title: String(keyword || "").trim(),
+    website,
+  };
+}
+
+function resolveMetaTitlePrompt({ promptRecord, client, keyword, contentType }) {
+  const resolvedPrompt = resolveAiPromptTemplate(promptRecord?.prompt, {
+    ...buildMetaTitlePromptValues({ client, keyword, contentType }),
+    max_character: String(promptRecord?.maxCharacter || "").trim(),
+    max_characters: String(promptRecord?.maxCharacter || "").trim(),
+  }).trim();
+
+  if (!resolvedPrompt) {
+    throw new AppError(
+      400,
+      "AI_PROMPT_RESOLUTION_FAILED",
+      `Resolved AI Hub prompt is empty for "${META_TITLE_PROMPT_TYPE}".`,
+    );
+  }
+
+  return resolvedPrompt;
 }
 
 function normalizeClientKeywordItem(value) {
@@ -448,14 +537,6 @@ async function patchSingleKeyword({
   return updated;
 }
 
-function buildTitlePrompt({ keyword, contentType }) {
-  const pageContext = contentType
-    ? ` for a ${contentType.toLowerCase()} on a medical practice website`
-    : " for a medical practice website";
-
-  return `Write one SEO page title (50-65 characters) targeting the keyword "${keyword}"${pageContext}. Return only the title text — no quotes, no explanation.`;
-}
-
 async function generateOneTitleAndPersist({
   db,
   io,
@@ -464,6 +545,8 @@ async function generateOneTitleAndPersist({
   keywordId,
   env,
   requestedBy,
+  client,
+  promptRecord,
 }) {
   const current = await patchSingleKeyword({
     db,
@@ -485,10 +568,13 @@ async function generateOneTitleAndPersist({
   });
 
   try {
-    const prompt = buildTitlePrompt({
+    const prompt = resolveMetaTitlePrompt({
+      client,
+      promptRecord,
       keyword: current.keyword,
       contentType: current.contentType,
     });
+    const maxCharacters = Number(promptRecord.maxCharacter || 100);
 
     const result = await integrationsService.fetchManusGeneratedText({
       db,
@@ -497,10 +583,12 @@ async function generateOneTitleAndPersist({
       payload: {
         clientId,
         prompt,
-        maxCharacters: 100,
+        maxCharacters: Number.isFinite(maxCharacters) ? maxCharacters : 100,
         auditContext: {
           source: "CLIENT_KEYWORDS_TITLE_GENERATION",
           keywordId,
+          promptId: promptRecord.id,
+          promptType: META_TITLE_PROMPT_TYPE,
         },
       },
     });
@@ -624,6 +712,41 @@ async function generateClientKeywordTitles({
     };
   }
 
+  const missingContentType = targets.find((row) => !row.contentType);
+
+  if (missingContentType) {
+    throw new AppError(
+      400,
+      "VALIDATION_ERROR",
+      `Content type is required before generating a title for "${missingContentType.keyword}".`,
+    );
+  }
+
+  const client = await db.client.findUnique({
+    where: { id: BigInt(clientId) },
+  });
+
+  if (!client) {
+    throw new AppError(404, "NOT_FOUND", "Client not found.");
+  }
+
+  const promptRecord = await db.aiPrompt.findFirst({
+    where: {
+      clientId: BigInt(clientId),
+      status: "Active",
+      typeOfPost: META_TITLE_PROMPT_TYPE,
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+
+  if (!promptRecord?.prompt) {
+    throw new AppError(
+      400,
+      "AI_PROMPT_NOT_FOUND",
+      `No active AI Hub prompt found for "${META_TITLE_PROMPT_TYPE}". Create or activate one in Settings → AI Hub.`,
+    );
+  }
+
   // Mark all targets as GENERATING up-front so the UI sees the spinner
   // immediately, even before the first AI call finishes.
   const initialNext = keywords.map((row) =>
@@ -653,6 +776,8 @@ async function generateClientKeywordTitles({
         keywordId: keyword.id,
         env,
         requestedBy,
+        client,
+        promptRecord,
       }),
     );
   });
