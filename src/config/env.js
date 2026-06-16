@@ -61,7 +61,7 @@ function readEmailList(value) {
     .filter(Boolean);
 }
 
-function readAiProvider(value, defaultValue = "MANUS") {
+function readAiProvider(value, defaultValue = "ANTHROPIC") {
   const normalized = String(value || "")
     .trim()
     .toUpperCase();
@@ -166,7 +166,7 @@ function readEnv() {
       googleRefreshToken: process.env.GOOGLE_SMTP_REFRESH_TOKEN || null,
     },
     integrations: {
-      aiTitleProvider: readAiProvider(process.env.AI_TITLE_PROVIDER, "MANUS"),
+      aiTitleProvider: readAiProvider(process.env.AI_TITLE_PROVIDER, "ANTHROPIC"),
       gbpPostingAiProvider: readAiProvider(
         process.env.GBP_POSTING_AI_PROVIDER,
         "ANTHROPIC",
@@ -221,9 +221,13 @@ function readEnv() {
       anthropic: {
         baseUrl: process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com",
         apiKey: process.env.ANTHROPIC_API_KEY || null,
-        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+        model:
+          process.env.ANTHROPIC_CONTENT_MODEL ||
+          process.env.ANTHROPIC_MODEL ||
+          "claude-sonnet-4-20250514",
         maxOutputTokens: readPositiveInteger(
-          process.env.ANTHROPIC_MAX_OUTPUT_TOKENS,
+          process.env.ANTHROPIC_MAX_OUTPUT_TOKENS ||
+            process.env.ANTHROPIC_MAX_TOKENS,
           4096,
         ),
       },

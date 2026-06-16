@@ -1,5 +1,5 @@
 const { AppError } = require('../../lib/errors');
-const anthropicContentService = require('../ai-content/anthropic.service');
+const integrationsService = require('../integrations/integrations.service');
 
 const GENERATED_CONTENT_PLACEHOLDER = '__GENERATED_CONTENT__';
 const CLIENT_KEYWORDS_LOCATION = '__client_keywords__';
@@ -999,11 +999,25 @@ async function runWebsiteContentGenerationJob({
     });
 
     const contentStartedAt = Date.now();
-    const generatedRaw = await anthropicContentService.generateMedicalWebsiteContent({
+    const generatedRaw = await integrationsService.fetchManusGeneratedText({
+      db,
       env,
-      maxOutputTokens: maxContentTokens,
-      prompt: resolvedPrompt,
-      layoutImageUrl,
+      requestedBy: actorUserId,
+      payload: {
+        auditContext: {
+          contentType,
+          feature: 'WEBSITE_CONTENT',
+          keyword: promptKeyword || title,
+          keywordId,
+          listId,
+          title,
+        },
+        clientId,
+        layoutImageUrl,
+        maxCharacters: maxContentTokens,
+        prompt: resolvedPrompt,
+        provider: env.integrations.aiTitleProvider,
+      },
     });
     // eslint-disable-next-line no-console
     console.log(`${logTag} content call done`, {
@@ -1024,10 +1038,24 @@ async function runWebsiteContentGenerationJob({
       ? seoPromptTemplate.replace(GENERATED_CONTENT_PLACEHOLDER, plainContent)
       : `${seoPromptTemplate}\n\nContent:\n${plainContent}`;
     const seoStartedAt = Date.now();
-    const seoRaw = await anthropicContentService.generateMedicalWebsiteContent({
+    const seoRaw = await integrationsService.fetchManusGeneratedText({
+      db,
       env,
-      maxOutputTokens: maxSeoTokens,
-      prompt: seoPrompt,
+      requestedBy: actorUserId,
+      payload: {
+        auditContext: {
+          contentType,
+          feature: 'WEBSITE_CONTENT_SEO',
+          keyword: promptKeyword || title,
+          keywordId,
+          listId,
+          title,
+        },
+        clientId,
+        maxCharacters: maxSeoTokens,
+        prompt: seoPrompt,
+        provider: env.integrations.aiTitleProvider,
+      },
     });
     // eslint-disable-next-line no-console
     console.log(`${logTag} SEO call done`, {

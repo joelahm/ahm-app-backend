@@ -23,6 +23,15 @@ const MANUS_ENDPOINTS = {
   taskListMessages: '/v2/task.listMessages'
 };
 
+const OPENAI_GENERATE_TEXT_INSTRUCTIONS = [
+  'You generate draft content for healthcare and medical business workflows.',
+  'Follow the user prompt exactly, including requested format, length, tone, and parsing rules.',
+  'Write patient-friendly, accurate, non-alarmist content.',
+  'Do not diagnose, prescribe, guarantee outcomes, or replace professional medical advice.',
+  'Avoid unsupported claims and avoid inventing credentials, prices, statistics, citations, or treatments.',
+  'Return only the requested content with no prefacing commentary.',
+].join(' ');
+
 function parseOptionalId(value, fieldName) {
   if (value === undefined || value === null || value === '') return null;
   const id = Number(value);
@@ -725,11 +734,78 @@ function requireManusConfig(env) {
 
 function normalizeAiProvider(value) {
   const normalized = String(value || '').trim().toUpperCase();
-  if (normalized === 'OPENAI' || normalized === 'ANTHROPIC') {
+  if (normalized === 'OPENAI' || normalized === 'ANTHROPIC' || normalized === 'MANUS') {
     return normalized;
   }
 
-  return 'MANUS';
+  return 'ANTHROPIC';
+}
+
+function isAnthropicModelName(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized.startsWith('claude-') || normalized.includes('anthropic');
+}
+
+function isOpenAiModelName(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return (
+    normalized.startsWith('gpt-') ||
+    normalized.startsWith('o1') ||
+    normalized.startsWith('o3') ||
+    normalized.startsWith('o4')
+  );
+}
+
+function resolveOpenAiModel(env, model) {
+  const requestedModel = optionalString(model);
+  if (requestedModel && !isAnthropicModelName(requestedModel)) {
+    return requestedModel;
+  }
+
+  return env.integrations.openai.model;
+}
+
+function resolveAnthropicModel(env, model) {
+  const requestedModel = optionalString(model);
+  if (requestedModel && !isOpenAiModelName(requestedModel)) {
+    return requestedModel;
+  }
+
+  return env.integrations.anthropic?.model || null;
+}
+
+function resolveOpenAiMaxOutputTokens({ env, maxCharacters, auditContext }) {
+  const configured = Number(env.integrations.openai.maxOutputTokens || 120);
+  const requestedCharacters = Number(maxCharacters);
+  const estimatedFromCharacters =
+    Number.isFinite(requestedCharacters) && requestedCharacters > 0
+      ? Math.ceil(requestedCharacters * 2)
+      : 0;
+  const feature = String(auditContext?.feature || auditContext?.source || '').toUpperCase();
+  const promptType = String(auditContext?.promptType || '').toUpperCase();
+  const minimum = feature.includes('GBP_POSTINGS')
+    ? 2048
+    : feature.includes('SEO') || promptType.includes('SEO')
+      ? 768
+      : promptType.includes('TITLE') || feature.includes('TITLE')
+        ? 256
+        : 256;
+
+  return Math.max(configured, estimatedFromCharacters, minimum);
+}
+
+function extractOpenAiErrorMessage(payload) {
+  const candidates = [
+    payload?.error?.message,
+    payload?.message,
+    payload?.incomplete_details?.reason
+      ? `OpenAI response incomplete: ${payload.incomplete_details.reason}.`
+      : null,
+    payload?.status ? `OpenAI response status: ${payload.status}.` : null,
+  ];
+  const message = candidates.map(optionalString).find(Boolean);
+
+  return message || 'OpenAI did not return assistant content.';
 }
 
 function extractManusAssistantText(payload) {
@@ -1650,20 +1726,22 @@ async function fetchSerpApiReviews({ db, env, requestedBy, payload }) {
   };
 }
 
-async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt, maxCharacters = null, auditContext = null }) {
+async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt, maxCharacters = null, model = null, auditContext = null }) {
   requireOpenAiConfig(env);
 
   const operation = 'GENERATE_TEXT';
   const endpoint = `${env.integrations.openai.baseUrl}/v1/responses`;
+  const resolvedModel = resolveOpenAiModel(env, model);
+  const maxOutputTokens = resolveOpenAiMaxOutputTokens({
+    env,
+    maxCharacters,
+    auditContext,
+  });
   const requestPayload = {
-    input: [
-      {
-        role: 'user',
-        content: [{ type: 'input_text', text: prompt }],
-      },
-    ],
-    max_output_tokens: Number(maxCharacters || env.integrations.openai.maxOutputTokens || 120),
-    model: env.integrations.openai.model,
+    input: prompt,
+    instructions: OPENAI_GENERATE_TEXT_INSTRUCTIONS,
+    max_output_tokens: maxOutputTokens,
+    model: resolvedModel,
   };
 
   const { response, payload: responsePayload } = await postJson(endpoint, {
@@ -1678,6 +1756,7 @@ async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt
   const outputText = extractOpenAiText(responsePayload);
   const success = response.ok && Boolean(outputText);
   const externalTaskId = String(responsePayload?.id || '').trim() || null;
+  const errorMessage = success ? null : extractOpenAiErrorMessage(responsePayload);
 
   const log = await persistManusApiLog({
     db,
@@ -1696,16 +1775,18 @@ async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt
     responsePayload,
     isSuccess: success,
     externalTaskId,
-    errorMessage: success ? null : 'OpenAI did not return assistant content.',
+    errorMessage,
   });
 
   if (!success) {
-    throw new AppError(502, 'UPSTREAM_API_ERROR', 'OpenAI did not return assistant content.', {
+    throw new AppError(502, 'UPSTREAM_API_ERROR', errorMessage, {
       provider: 'OPENAI',
       operation,
       logId: Number(log.id),
       upstreamStatus: response.status,
       externalTaskId,
+      upstreamError: responsePayload?.error || null,
+      incompleteDetails: responsePayload?.incomplete_details || null,
     });
   }
 
@@ -1721,7 +1802,7 @@ async function fetchOpenAiGeneratedText({ db, env, requestedBy, clientId, prompt
 async function fetchAnthropicGeneratedText({ db, env, requestedBy, clientId, prompt, maxCharacters = null, model = null, auditContext = null, layoutImageUrl = null }) {
   const operation = 'GENERATE_TEXT';
   const endpoint = `${String(env.integrations.anthropic?.baseUrl || 'https://api.anthropic.com').replace(/\/+$/, '')}/v1/messages`;
-  const resolvedModel = optionalString(model) || env.integrations.anthropic?.model || null;
+  const resolvedModel = resolveAnthropicModel(env, model);
   const requestPayload = {
     maxOutputTokens: Number(maxCharacters || env.integrations.anthropic?.maxOutputTokens || 4096),
     model: resolvedModel,
@@ -1836,6 +1917,7 @@ async function fetchManusGeneratedText({ db, env, requestedBy, payload }) {
       clientId,
       prompt,
       maxCharacters,
+      model,
       auditContext,
       layoutImageUrl: optionalString(payload.layoutImageUrl) || null,
     });
