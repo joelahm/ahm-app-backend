@@ -221,7 +221,10 @@ function readEnv() {
       anthropic: {
         baseUrl: process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com",
         apiKey: process.env.ANTHROPIC_API_KEY || null,
-        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+        model:
+          process.env.ANTHROPIC_CONTENT_MODEL ||
+          process.env.ANTHROPIC_MODEL ||
+          "claude-sonnet-4-6",
         maxOutputTokens: readPositiveInteger(
           process.env.ANTHROPIC_MAX_OUTPUT_TOKENS,
           4096,

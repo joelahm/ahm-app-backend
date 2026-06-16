@@ -241,7 +241,7 @@ function resolveAnthropicConfig(env) {
     apiKey,
     baseUrl: optionalString(config.baseUrl) || 'https://api.anthropic.com',
     maxOutputTokens: readPositiveInteger(config.maxOutputTokens, 4096),
-    model: optionalString(config.model) || 'claude-sonnet-4-20250514',
+    model: optionalString(config.model) || 'claude-sonnet-4-6',
   };
 }
 
