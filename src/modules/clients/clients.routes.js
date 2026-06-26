@@ -20,6 +20,7 @@ const CLIENT_READ_PERMISSIONS = [
 ];
 
 router.get('/', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.listClients);
+router.get('/export.csv', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.exportClientsCsv);
 router.get('/discord/statuses', requireAnyPermission(CLIENT_READ_PERMISSIONS), clientsController.listClientDiscordStatuses);
 // Service scopes non-admins to clients they're connected to
 // (assigned, or CSM/AM/task-assignee of any of the client's projects).

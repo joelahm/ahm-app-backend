@@ -336,6 +336,272 @@ function mapClient(client) {
   };
 }
 
+const CLIENT_EXPORT_COLUMNS = [
+  { key: "clientId", label: "clientId" },
+  { key: "assignedToId", label: "assignedToId" },
+  { key: "assignedToName", label: "assignedToName" },
+  { key: "status", label: "status" },
+  { key: "clientTitle", label: "clientTitle" },
+  { key: "clientName", label: "clientName" },
+  { key: "businessName", label: "businessName" },
+  { key: "niche", label: "niche" },
+  { key: "personalEmail", label: "personalEmail" },
+  { key: "businessEmail", label: "businessEmail" },
+  { key: "personalPhone", label: "personalPhone" },
+  { key: "businessPhone", label: "businessPhone" },
+  { key: "website", label: "website" },
+  { key: "practiceStructure", label: "practiceStructure" },
+  { key: "typeOfPractice", label: "typeOfPractice" },
+  { key: "gmcRegistrationNumber", label: "gmcRegistrationNumber" },
+  { key: "buildingName", label: "buildingName" },
+  { key: "unitNumber", label: "unitNumber" },
+  { key: "streetAddress", label: "streetAddress" },
+  { key: "region", label: "region" },
+  { key: "postCode", label: "postCode" },
+  { key: "country", label: "country" },
+  { key: "fullAddress", label: "fullAddress" },
+  { key: "targetArea", label: "targetArea" },
+  { key: "nearbyAreasServed", label: "nearbyAreasServed" },
+  { key: "mondayHours", label: "mondayHours" },
+  { key: "tuesdayHours", label: "tuesdayHours" },
+  { key: "wednesdayHours", label: "wednesdayHours" },
+  { key: "thursdayHours", label: "thursdayHours" },
+  { key: "fridayHours", label: "fridayHours" },
+  { key: "saturdayHours", label: "saturdayHours" },
+  { key: "sundayHours", label: "sundayHours" },
+  { key: "credentials", label: "credentials" },
+  { key: "majorAccomplishments", label: "majorAccomplishments" },
+  { key: "uniqueToCompetitors", label: "uniqueToCompetitors" },
+  { key: "topMedicalSpecialties", label: "topMedicalSpecialties" },
+  { key: "subSpecialties", label: "subSpecialties" },
+  { key: "topTreatments", label: "topTreatments" },
+  { key: "highQualityHeadshot", label: "highQualityHeadshot" },
+  { key: "yourCv", label: "yourCv" },
+  { key: "logo", label: "logo" },
+  { key: "brandGuideline", label: "brandGuideline" },
+  {
+    key: "practiceLocationInteriorPhoto",
+    label: "practiceLocationInteriorPhoto",
+  },
+  {
+    key: "practiceLocationExteriorPhoto",
+    label: "practiceLocationExteriorPhoto",
+  },
+  { key: "otherImages", label: "otherImages" },
+  { key: "googleBusinessProfileLink", label: "googleBusinessProfileLink" },
+  { key: "discordChannel", label: "discordChannel" },
+  { key: "facebook", label: "facebook" },
+  { key: "instagram", label: "instagram" },
+  { key: "linkedin", label: "linkedin" },
+  { key: "treatmentsAndServices", label: "treatmentsAndServices" },
+  { key: "conditionsTreated", label: "conditionsTreated" },
+  { key: "websiteLoginLink", label: "websiteLoginLink" },
+  { key: "websiteUsername", label: "websiteUsername" },
+  { key: "websitePassword", label: "websitePassword" },
+  { key: "createdBy", label: "createdBy" },
+  { key: "createdAt", label: "createdAt" },
+  { key: "updatedAt", label: "updatedAt" },
+];
+
+const EXPORT_DAY_KEYS = {
+  Friday: "fridayHours",
+  Monday: "mondayHours",
+  Saturday: "saturdayHours",
+  Sunday: "sundayHours",
+  Thursday: "thursdayHours",
+  Tuesday: "tuesdayHours",
+  Wednesday: "wednesdayHours",
+};
+
+function joinExportArray(value) {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+
+  return value
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .join("; ");
+}
+
+function formatExportDate(value) {
+  if (!value) {
+    return "";
+  }
+
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
+  return date.toISOString().replace("T", " ").slice(0, 19);
+}
+
+function buildExportAddress(client) {
+  const seen = new Set();
+
+  return [
+    client.buildingName,
+    client.unitNumber,
+    client.streetAddress || client.addressLine1,
+    client.addressLine2,
+    client.cityState || client.region,
+    client.postCode,
+    client.country,
+  ]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .filter((part) => {
+      const normalized = part.toLowerCase();
+      if (seen.has(normalized)) {
+        return false;
+      }
+      seen.add(normalized);
+      return true;
+    })
+    .join(", ");
+}
+
+function formatPracticeHour(value) {
+  if (!value || typeof value !== "object" || !value.enabled) {
+    return "Closed";
+  }
+
+  const startTime = String(value.startTime || "").trim();
+  const startMeridiem = String(value.startMeridiem || "").trim();
+  const endTime = String(value.endTime || "").trim();
+  const endMeridiem = String(value.endMeridiem || "").trim();
+
+  if (!startTime && !endTime) {
+    return "";
+  }
+
+  return `${[startTime, startMeridiem].filter(Boolean).join(" ")} - ${[
+    endTime,
+    endMeridiem,
+  ]
+    .filter(Boolean)
+    .join(" ")}`.trim();
+}
+
+function mapPracticeHoursForExport(practiceHours) {
+  const result = Object.values(EXPORT_DAY_KEYS).reduce((hours, key) => {
+    hours[key] = "";
+    return hours;
+  }, {});
+
+  if (!Array.isArray(practiceHours)) {
+    return result;
+  }
+
+  for (const item of practiceHours) {
+    const key = EXPORT_DAY_KEYS[item?.day];
+    if (!key) {
+      continue;
+    }
+    result[key] = formatPracticeHour(item);
+  }
+
+  return result;
+}
+
+function getAssignedUserName(user) {
+  if (!user) {
+    return "";
+  }
+
+  return [user.firstName, user.lastName]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+function mapClientExportRow(client) {
+  const practiceHours = mapPracticeHoursForExport(client.practiceHours);
+
+  return {
+    clientId: Number(client.id),
+    assignedToId: client.assignedTo ? Number(client.assignedTo) : "",
+    assignedToName: getAssignedUserName(client.assignedUser),
+    status: client.status ?? "",
+    clientTitle: client.profession ?? "",
+    clientName: client.clientName ?? "",
+    businessName: client.businessName ?? "",
+    niche: client.niche ?? "",
+    personalEmail: client.personalEmail ?? "",
+    businessEmail: client.practiceEmail ?? "",
+    personalPhone: client.personalPhone ?? "",
+    businessPhone: client.businessPhone ?? "",
+    website: client.website ?? "",
+    practiceStructure: client.practiceStructure ?? "",
+    typeOfPractice: client.typeOfPractice ?? "",
+    gmcRegistrationNumber: client.gmcRegistrationNumber ?? "",
+    buildingName: client.buildingName ?? "",
+    unitNumber: client.unitNumber ?? "",
+    streetAddress: client.streetAddress ?? "",
+    region: client.region ?? "",
+    postCode: client.postCode ?? "",
+    country: client.country ?? "",
+    fullAddress: buildExportAddress(client),
+    targetArea: client.visibleArea ?? "",
+    nearbyAreasServed: client.nearbyAreasServed ?? "",
+    ...practiceHours,
+    credentials: client.credentials ?? "",
+    majorAccomplishments: client.majorAccomplishments ?? "",
+    uniqueToCompetitors: client.uniqueToCompetitors ?? "",
+    topMedicalSpecialties: joinExportArray(client.topMedicalSpecialties),
+    subSpecialties: joinExportArray(client.subSpecialties),
+    topTreatments: joinExportArray(client.topTreatments),
+    highQualityHeadshot: joinExportArray(client.highQualityHeadshot),
+    yourCv: joinExportArray(client.yourCv),
+    logo: joinExportArray(client.logo),
+    brandGuideline: joinExportArray(client.colorGuide),
+    practiceLocationInteriorPhoto: joinExportArray(
+      client.practiceLocationInteriorPhoto,
+    ),
+    practiceLocationExteriorPhoto: joinExportArray(
+      client.practiceLocationExteriorPhoto,
+    ),
+    otherImages: joinExportArray(client.otherImages),
+    googleBusinessProfileLink: client.gbpLink ?? "",
+    discordChannel: client.discordChannel ?? "",
+    facebook: client.facebook ?? "",
+    instagram: client.instagram ?? "",
+    linkedin: client.linkedin ?? "",
+    treatmentsAndServices: joinExportArray(client.treatmentAndServices),
+    conditionsTreated: joinExportArray(client.conditionsTreated),
+    websiteLoginLink: client.websiteLoginLink ?? "",
+    websiteUsername: client.websiteUsername ?? "",
+    websitePassword: client.websitePassword ?? "",
+    createdBy: client.createdBy ? Number(client.createdBy) : "",
+    createdAt: formatExportDate(client.createdAt),
+    updatedAt: formatExportDate(client.updatedAt),
+  };
+}
+
+function escapeCsvValue(value) {
+  const normalized = String(value ?? "").replace(/\r?\n|\r/g, " ");
+
+  if (/[",\n\r]/.test(normalized)) {
+    return `"${normalized.replace(/"/g, '""')}"`;
+  }
+
+  return normalized;
+}
+
+function buildClientsCsv(clients) {
+  const header = CLIENT_EXPORT_COLUMNS.map((column) => column.label).join(",");
+  const rows = clients.map((client) => {
+    const row = mapClientExportRow(client);
+
+    return CLIENT_EXPORT_COLUMNS.map((column) =>
+      escapeCsvValue(row[column.key]),
+    ).join(",");
+  });
+
+  return [header, ...rows].join("\r\n");
+}
+
 function mapProjectUser(user) {
   if (!user) return null;
   return {
@@ -1385,6 +1651,22 @@ async function listClients({ db, actorUserId, actorRole }) {
   });
 
   return clients.map(mapClient);
+}
+
+async function exportClientsCsv({ db, actorUserId, actorRole }) {
+  const visibilityWhere = isAdminRole(actorRole)
+    ? {}
+    : buildVisibleClientWhere(actorUserId);
+  const clients = await db.client.findMany({
+    where: {
+      ...visibilityWhere,
+      status: { not: "DELETED" },
+    },
+    include: ASSIGNED_USER_INCLUDE,
+    orderBy: { id: "desc" },
+  });
+
+  return buildClientsCsv(clients);
 }
 
 function getDiscordBotToken(env) {
@@ -3574,6 +3856,7 @@ async function deleteClient({ db, clientId }) {
 module.exports = {
   createClient,
   deleteClient,
+  exportClientsCsv,
   listClients,
   listClientDiscordStatuses,
   getClientById,

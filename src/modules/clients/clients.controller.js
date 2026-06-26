@@ -78,6 +78,26 @@ async function listClients(req, res, next) {
   }
 }
 
+async function exportClientsCsv(req, res, next) {
+  try {
+    const csv = await clientsService.exportClientsCsv({
+      db: req.app.locals.db,
+      actorRole: req.auth.role,
+      actorUserId: req.auth.userId,
+    });
+    const timestamp = new Date().toISOString().slice(0, 10);
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="clients-export-${timestamp}.csv"`,
+    );
+    res.status(200).send(`\uFEFF${csv}`);
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listClientDiscordStatuses(req, res, next) {
   try {
     const statuses = await clientsService.listClientDiscordStatuses({
@@ -731,6 +751,7 @@ async function listClientProjects(req, res, next) {
 
 module.exports = {
   listClients,
+  exportClientsCsv,
   listClientDiscordStatuses,
   getClientById,
   getClientGbpDetails,
